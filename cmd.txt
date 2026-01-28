@@ -1,0 +1,15 @@
+# Project setup
+conda activate energy-ai-factory
+pip install -r requirements.txt
+
+# Docker management
+docker-compose up -d              # Start services
+docker-compose logs -f ollama     # View Ollama logs
+docker exec ollama ollama list    # List installed models
+
+# Data operations
+curl "https://odre.opendatasoft.com/api/explore/v2.1/catalog/datasets/eco2mix-national-tr/records?limit=5"
+
+# Run services
+python -m app.main               # FastAPI backend
+streamlit run dashboard/app.py   # Dashboard
