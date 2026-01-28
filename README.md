@@ -1,6 +1,6 @@
 📌 Project Overview
 
-France Energy AI Analyst is an open-source, multi-agent AI system that analyzes France’s real-time electricity grid data using the official eco2mix API.
+Energy AI Analyst is an open-source, multi-agent AI system that analyzes France’s real-time electricity grid data using the official eco2mix API.
 
 The system uses:
 
