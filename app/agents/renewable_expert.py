@@ -1,7 +1,23 @@
-# app/agents/renewable_expert.py
-from langchain.agents import AgentExecutor, create_react_agent
+# app/agents/renewable_expert.py - FIXED FOR LANGCHAIN 1.2.4
+# Try different import patterns
+try:
+    from langchain.agents.agent_executor import AgentExecutor
+except ImportError:
+    try:
+        from langchain.agents import AgentExecutor
+    except ImportError:
+        raise ImportError("Could not import AgentExecutor")
+
+try:
+    from langchain.agents import create_tool_calling_agent
+except ImportError:
+    try:
+        from langchain.agents.react.base import create_react_agent as create_tool_calling_agent
+    except ImportError:
+        raise ImportError("Could not find create_tool_calling_agent or create_react_agent")
+
 from langchain_core.tools import Tool
-from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 from app.llm_setup import LLMFactory
 from app.tools.data_tools import Eco2mixDataTools
 
@@ -25,28 +41,29 @@ class RenewableExpertAgent:
             )
         ]
         
-        # Create prompt
-        prompt_template = """You are a Renewable Energy Expert specializing in France's electricity grid.
+        # Create prompt for LangChain 1.x
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a Renewable Energy Expert specializing in France's electricity grid.
+            Focus on solar, wind, hydro, and other renewable sources.
+            Analyze trends, provide insights about renewable energy adoption and impact."""),
+            ("human", "{input}"),
+            ("placeholder", "{agent_scratchpad}"),
+        ])
         
-        Available tools:
-        {tools}
-        
-        Use this format:
-        Question: {input}
-        Thought: {agent_scratchpad}
-        """
-        
-        self.prompt = PromptTemplate.from_template(prompt_template)
-        
-        # Create agent
-        agent = create_react_agent(llm=self.llm, tools=self.tools, prompt=self.prompt)
+        # Create agent using new API
+        agent = create_tool_calling_agent(
+            llm=self.llm,
+            tools=self.tools,
+            prompt=prompt
+        )
         
         self.agent_executor = AgentExecutor(
             agent=agent,
             tools=self.tools,
             verbose=True,
             handle_parsing_errors=True,
-            max_iterations=3
+            max_iterations=3,
+            early_stopping_method="generate"
         )
     
     def analyze(self, query: str):

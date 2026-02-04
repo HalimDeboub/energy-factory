@@ -4,10 +4,22 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from langchain_core.tools import tool
-
+#from functools import lru_cache
+import time
 class Eco2mixDataTools:
     def __init__(self):
         self.base_url = "https://odre.opendatasoft.com/api/explore/v2.1/catalog/datasets/eco2mix-national-tr/records"
+        
+    # @lru_cache(maxsize=100)
+    # def get_real_time_data_cached(self, limit: int = 10) -> str:
+    #     """Cached version of get_real_time_data (15 minute cache)"""
+    #     current_minute = int(time.time() // 900)  # 900 seconds = 15 minutes
+    #     return self.get_real_time_data(limit)    
+        
+        
+        
+        
+        
         
     @tool
     def get_real_time_data(self, limit: int = 10) -> str:
@@ -44,6 +56,8 @@ CO2 Intensity: {record.get('taux_co2', 0)} g/kWh
     
     @tool
     def get_energy_mix(self, date: Optional[str] = None) -> str:
+        
+    
         """Get energy mix percentages for a specific date"""
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
@@ -78,3 +92,20 @@ CO2 Intensity: {record.get('taux_co2', 0)} g/kWh
             return "No data available for the specified date"
         except Exception as e:
             return f"Error: {str(e)}"
+    
+    @tool
+    def get_timeseries_data(self, hours: int = 24) -> str:
+      """Get energy data for the last N hours"""
+      params = {
+        "limit": hours * 4,  # 15-min intervals
+        "order_by": "date desc"
+       }
+    
+      response = requests.get(self.base_url, params=params)
+      data = response.json()
+    
+      if 'results' in data and data['results']:
+        df = pd.DataFrame(data['results'])
+        # Calculate trends, changes, etc.
+        return df.to_string()
+      return "No data available"

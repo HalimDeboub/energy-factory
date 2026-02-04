@@ -10,7 +10,7 @@ st.markdown("Real-time analysis of France's energy grid")
 
 # Sidebar
 st.sidebar.header("Settings")
-api_url = st.sidebar.text_input("API URL", "http://localhost:8001")
+api_url = st.sidebar.text_input("API URL", "http://localhost:9000")
 
 # Helper function to format numbers safely
 def format_number(value):
@@ -35,9 +35,9 @@ with col1:
         with st.spinner("Analyzing..."):
             try:
                 response = requests.post(
-                    f"{api_url}/analyze",
+                    f"{api_url}/analyze-energy",
                     json={"query": query},
-                    timeout=10
+                    timeout=500
                 )
                 
                 if response.status_code == 200:
@@ -125,7 +125,7 @@ with col2:
         try:
             response = requests.get(
                 "https://odre.opendatasoft.com/api/explore/v2.1/catalog/datasets/eco2mix-national-tr/records",
-                params={"limit": 1, "order_by": "date desc"},
+                params={"limit": 10, "order_by": "date desc"},
                 timeout=10
             )
             
