@@ -26,38 +26,42 @@ class EnergyDatabase:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_date_heure ON energy_data(date_heure DESC)")
         self.conn.commit()
     
+    
+        # app/database.py → EnergyDatabase.store_records()
+
     def store_records(self, records):
-        """Store with FULL ISO8601 timezone-aware timestamps"""
+        """Store records with duplicate prevention. Returns count of NEW records."""
         cursor = self.conn.cursor()
         placeholders = ", ".join(["?"] * len(CRITICAL_FIELDS))
         cols = ", ".join(CRITICAL_FIELDS)
+        stored_count = 0
         
         for record in records:
-            # CRITICAL FIX: Preserve full ISO8601 with timezone offset
             raw_ts = record.get("date_heure", "")
             if not raw_ts:
                 continue
-                
-            # Normalize to consistent format (handle both "Z" and "+01:00" formats)
-            if raw_ts.endswith('Z'):
-                raw_ts = raw_ts[:-1] + '+00:00'
-            elif '+' not in raw_ts and '-' not in raw_ts[10:]:
-                # Add timezone if missing (RTE sometimes omits in older records)
-                raw_ts += '+01:00'  # CET winter time
             
-            # Skip duplicates using FULL timestamp
-            cursor.execute(
-                "SELECT 1 FROM energy_data WHERE date_heure = ?", 
-                (raw_ts,)
-            )
-            if cursor.fetchone():
+            # ✅ CRITICAL: NO NORMALIZATION - store EXACTLY as received
+            # Only validate it has timezone info for debugging
+            if '+' not in raw_ts and not raw_ts.endswith('Z'):
+                print(f"⚠️ Skipping record with naive timestamp (no TZ): {raw_ts}")
                 continue
+            
+            # Skip duplicates using RAW timestamp string
+            cursor.execute("SELECT 1 FROM energy_data WHERE date_heure = ?", (raw_ts,))
+            if cursor.fetchone():
+                continue  # Already exists → skip
             
             values = [raw_ts if field == "date_heure" else record.get(field) for field in CRITICAL_FIELDS]
             cursor.execute(f"INSERT INTO energy_data ({cols}) VALUES ({placeholders})", values)
+            stored_count += 1
         
         self.conn.commit()
+        return stored_count  # Returns int (never None)
     
+
+
+
     def get_latest_record(self):
         """Get absolute latest record (no time filtering)"""
         cursor = self.conn.cursor()
@@ -112,8 +116,16 @@ class EnergyDatabase:
         else:
             print("❌ No records in database!")
             
-            
-            
+    # app/database.py → EnergyDatabase class
+    def get_record_count(self):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM energy_data")
+        return cursor.fetchone()[0]
+
+    
+    
+    
+    
     # def _validate_timestamp(self, ts: str) -> str:
     #   """Reject naive timestamps BEFORE storage (fail fast)"""
     #   if not ts or ('+' not in ts and not ts.endswith('Z')):

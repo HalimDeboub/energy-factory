@@ -1,0 +1,19 @@
+# Ignore local database files
+*.db
+*.sqlite
+*.env
+# Ignore API call logs
+api_calls.json
+# Ignore virtual environment folders
+venv/
+env/
+# Ignore IDE/editor specific files
+.vscode/
+.idea/
+*.pyc
+__pycache__/
+# Ignore logs and temporary files
+logs/   
+*.log
+temp/
+tmp/

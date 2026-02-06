@@ -29,8 +29,20 @@ class ContextBuilder:
             f"CO₂ = {record['taux_co2']} g/kWh"
         )
     
-    def build_for_query(self, query, time_intent=None):
-        """Build time-aware context WITHOUT vector search"""
+    def build_for_query(self, inputs: str | dict, time_intent: str | None = None) -> str:
+        """
+        Dual-signature: works with both direct calls AND LangChain chains.
+        
+        Usage 1 (direct): build_for_query("quelle est la conso ?", "current")
+        Usage 2 (chain):  build_for_query({"query": "...", "time_intent": "current"})
+        """
+        # Handle LangChain chain input (dict)
+        if isinstance(inputs, dict):
+            query = inputs["query"]
+            time_intent = inputs.get("time_intent", time_intent)  # Override if provided in dict
+        else:
+            query = inputs  # Direct string call
+            """Build time-aware context WITHOUT vector search"""
         now = datetime.now(self.tz)
         
         # Rule-based time intent detection (no LLM needed for this)
