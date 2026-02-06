@@ -1,7 +1,7 @@
 import schedule
 import time
 from datetime import datetime
-from tools.data_fetcher import RTEDataFetcher
+from app.tools.data_fetcher import RTEDataFetcher
 import shutil
 
 def job():

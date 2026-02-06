@@ -1,7 +1,7 @@
 import requests
 import json
 from datetime import datetime
-from config.config import (
+from app.config.config import (
     RTE_API_URL, RTE_DATASET, API_QUOTA_LIMIT, API_CALLS_TRACKING, CRITICAL_FIELDS
 )
 from app.database.database import EnergyDatabase

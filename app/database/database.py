@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime
 import pytz
-from config.config import DB_PATH, CRITICAL_FIELDS, TIMEZONE
+from app.config.config import DB_PATH, CRITICAL_FIELDS, TIMEZONE
 
 class EnergyDatabase:
     def __init__(self):
