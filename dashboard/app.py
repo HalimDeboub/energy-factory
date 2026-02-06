@@ -51,61 +51,61 @@ with col1:
                         st.write(result.get("analysis", "No analysis available"))
                         
                         # Show data with safe formatting
-                        with st.expander("📊 View Data"):
-                            if "data" in result:
-                                data = result["data"]
+                        # with st.expander("📊 View Data"):
+                        #     if "data" in result:
+                        #         data = result["data"]
                                 
-                                # Create metrics with safe formatting
-                                col1, col2, col3 = st.columns(3)
+                        #         # Create metrics with safe formatting
+                        #         col1, col2, col3 = st.columns(3)
                                 
-                                with col1:
-                                    st.metric("⚡ Production", f"{format_number(data.get('production_MW'))} MW")
-                                    st.metric("🔌 Consumption", f"{format_number(data.get('consumption_MW'))} MW")
-                                    st.metric("☢️ Nuclear", f"{format_number(data.get('nuclear_MW'))} MW")
+                        #         with col1:
+                        #             st.metric("⚡ Production", f"{format_number(data.get('production_MW'))} MW")
+                        #             st.metric("🔌 Consumption", f"{format_number(data.get('consumption_MW'))} MW")
+                        #             st.metric("☢️ Nuclear", f"{format_number(data.get('nuclear_MW'))} MW")
                                 
-                                with col2:
-                                    st.metric("🌬️ Wind", f"{format_number(data.get('wind_MW'))} MW")
-                                    st.metric("🌞 Solar", f"{format_number(data.get('solar_MW'))} MW")
-                                    st.metric("🌊 Hydro", f"{format_number(data.get('hydro_MW'))} MW")
+                        #         with col2:
+                        #             st.metric("🌬️ Wind", f"{format_number(data.get('wind_MW'))} MW")
+                        #             st.metric("🌞 Solar", f"{format_number(data.get('solar_MW'))} MW")
+                        #             st.metric("🌊 Hydro", f"{format_number(data.get('hydro_MW'))} MW")
                                 
-                                with col3:
-                                    st.metric("🏭 Gas", f"{format_number(data.get('gas_MW'))} MW")
-                                    st.metric("🌍 CO2", f"{format_number(data.get('carbon_intensity'))} g/kWh")
-                                    st.metric("🕐 Updated", data.get('timestamp', 'N/A'))
+                        #         with col3:
+                        #             st.metric("🏭 Gas", f"{format_number(data.get('gas_MW'))} MW")
+                        #             st.metric("🌍 CO2", f"{format_number(data.get('carbon_intensity'))} g/kWh")
+                        #             st.metric("🕐 Updated", data.get('timestamp', 'N/A'))
                                 
-                                # Create pie chart only if we have positive values
-                                production = float(format_number(data.get('production_MW')).replace(',', ''))
-                                if production > 0:
-                                    st.subheader("Energy Mix")
+                        #         # Create pie chart only if we have positive values
+                        #         production = float(format_number(data.get('production_MW')).replace(',', ''))
+                        #         if production > 0:
+                        #             st.subheader("Energy Mix")
                                     
-                                    # Get values safely
-                                    mix_data = {}
-                                    sources = [
-                                        ("Nuclear", data.get('nuclear_MW')),
-                                        ("Wind", data.get('wind_MW')),
-                                        ("Solar", data.get('solar_MW')),
-                                        ("Hydro", data.get('hydro_MW')),
-                                        ("Gas", data.get('gas_MW'))
-                                    ]
+                        #             # Get values safely
+                        #             mix_data = {}
+                        #             sources = [
+                        #                 ("Nuclear", data.get('nuclear_MW')),
+                        #                 ("Wind", data.get('wind_MW')),
+                        #                 ("Solar", data.get('solar_MW')),
+                        #                 ("Hydro", data.get('hydro_MW')),
+                        #                 ("Gas", data.get('gas_MW'))
+                        #             ]
                                     
-                                    for name, value in sources:
-                                        try:
-                                            val = float(value) if value is not None else 0
-                                            if val > 0:
-                                                mix_data[name] = val
-                                        except (ValueError, TypeError):
-                                            continue
+                        #             for name, value in sources:
+                        #                 try:
+                        #                     val = float(value) if value is not None else 0
+                        #                     if val > 0:
+                        #                         mix_data[name] = val
+                        #                 except (ValueError, TypeError):
+                        #                     continue
                                     
-                                    if mix_data:
-                                        fig = go.Figure(data=[go.Pie(
-                                            labels=list(mix_data.keys()),
-                                            values=list(mix_data.values()),
-                                            hole=0.3,
-                                            textinfo='label+percent'
-                                        )])
-                                        st.plotly_chart(fig)
-                                    else:
-                                        st.info("No positive production data available for pie chart.")
+                        #             if mix_data:
+                        #                 fig = go.Figure(data=[go.Pie(
+                        #                     labels=list(mix_data.keys()),
+                        #                     values=list(mix_data.values()),
+                        #                     hole=0.3,
+                        #                     textinfo='label+percent'
+                        #                 )])
+                        #                 st.plotly_chart(fig)
+                        #             else:
+                                        # st.info("No positive production data available for pie chart.")
                     else:
                         st.error(f"Error: {result.get('message', 'Unknown error')}")
                 else:
