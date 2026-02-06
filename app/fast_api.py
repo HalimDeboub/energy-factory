@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import logging
-from tools.rag_pipeline import EnergyRAG
+from app.tools.rag_pipeline import EnergyRAG
 from datetime import datetime
 
 # Setup logging
@@ -63,5 +63,5 @@ async def analyze_energy(query: Query):
         #     "timestamp": datetime.now().isoformat()
         # }
     except Exception as e:
-        logger.error(f"Error+++: {e}")
+        logger.error(f"Error: {e}")
         return {"status": "error", "message": str(e)}

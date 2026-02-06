@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 import pytz
-from config.config import TIMEZONE
-from database.database import EnergyDatabase
+from app.config.config import TIMEZONE
+from app.database.database import EnergyDatabase
 
 class ContextBuilder:
     def __init__(self):

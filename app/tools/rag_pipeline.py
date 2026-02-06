@@ -1,7 +1,7 @@
 from langchain_ollama import OllamaLLM
 from langchain_core.prompts import ChatPromptTemplate
-from config.config import OLLAMA_HOST, OLLAMA_MODEL
-from tools.context_builder import ContextBuilder
+from app.config.config import OLLAMA_HOST, OLLAMA_MODEL
+from app.tools.context_builder import ContextBuilder
 
 class EnergyRAG:
     def __init__(self):
@@ -34,5 +34,4 @@ Réponse :"""
     def query(self, user_query, time_intent=None):
         context = self.context_builder.build_for_query(user_query, time_intent)
         chain = self.prompt | self.llm
-        print(context)
         return chain.invoke({"context": context, "query": user_query})
