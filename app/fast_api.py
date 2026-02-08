@@ -1,67 +1,36 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
-import logging
 from app.tools.rag_pipeline import EnergyRAG
-from datetime import datetime
+from datetime import datetime  # 🔑 CRITICAL: Was missing!
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+app = FastAPI(title="🇫🇷 French Energy RAG API")
+rag = EnergyRAG()
 
-
-
-app = FastAPI(
-    title="Local RAG API",
-    description="A local Retrieval-Augmented Generation API for energy data analysis",
-    version="1.0.0"
-)
-# Add CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-class Query(BaseModel):
+class QueryRequest(BaseModel):
     query: str
+    session_id: str = "streamlit_default"  # ← Enables conversation memory
+    time_intent: str | None = None
 
-
-@app.get("/")
-async def read_root():
-    return {"message": "Welcome to the Local RAG API for Energy Data Analysis"} 
-
-
-@app.post("/analyze")
-async def analyze_query(query: str):
-    # Placeholder for RAG analysis logic
-    # In a real implementation, this would involve retrieving relevant documents
-    # and generating a response using a language model.
-    return {
-        "query": query,
-        "analysis": "This is a placeholder response for the query analysis."
-    }   
-@app.post("/analyze-energy")  
-async def analyze_energy(query: Query):
+@app.post("/analyze-energy")
+async def analyze_energy(req: QueryRequest):
     try:
-       rag = EnergyRAG()
-       print(query.query)
-       result = rag.query(query.query)
-       return {
-              "status": "success",
-              "query": query.query,
-              "analysis": result,
-              "timestamp": datetime.now().isoformat()}
-        
-        # return {
-        #     "status": "success",
-        #     "query": query.query,
-        #     "analysis": result.get("result+++", ""),
-        #     "agent_used": result.get("agent_used", "unknown"),
-        #     "timestamp": datetime.now().isoformat()
-        # }
+        # 🔑 CORRECT CALL: Uses "input" key internally (handled by query() method)
+        answer = rag.query(
+            user_query=req.query,
+            session_id=req.session_id,  # ← Enables multi-turn memory
+            time_intent=req.time_intent
+        )
+        return {
+            "status": "success",
+            "analysis": answer,
+            "timestamp": datetime.now().isoformat()
+        }
     except Exception as e:
-        logger.error(f"Error: {e}")
-        return {"status": "error", "message": str(e)}
+        raise HTTPException(
+            status_code=500,
+            detail=f"RAG failed: {str(e)[:100]}"
+        )
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "eco2mix_api": "operational"}

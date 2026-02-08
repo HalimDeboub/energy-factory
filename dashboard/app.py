@@ -109,7 +109,7 @@ with col1:
                     else:
                         st.error(f"Error: {result.get('message', 'Unknown error')}")
                 else:
-                    st.error(f"API Error: {response.status_code}")
+                    st.error(f"API Error: {response.status_code} - {response.text}")
                     
             except requests.exceptions.Timeout:
                 st.error("Request timed out. Please try again.")

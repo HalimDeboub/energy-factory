@@ -1,7 +1,8 @@
+# app/tools/context_builder.py
 from datetime import datetime, timedelta
 import pytz
 from app.config.config import TIMEZONE
-from app.database.database import EnergyDatabase
+from app.tools.data_fetcher import EnergyDatabase
 
 class ContextBuilder:
     def __init__(self):
@@ -10,75 +11,73 @@ class ContextBuilder:
     
     def _format_record(self, record):
         """Convert raw numbers to natural language snippet"""
-        dt = datetime.fromisoformat(record["date_heure"]).astimezone(self.tz)
+        try:
+            dt = datetime.fromisoformat(record["date_heure"].replace('Z', '+00:00')).astimezone(self.tz)
+        except ValueError:
+            # Fallback for malformed timestamps
+            dt_str = record["date_heure"][:19]
+            dt = self.tz.localize(datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%S"))
+        
         time_str = dt.strftime("%H:%M")
         date_str = "aujourd'hui" if dt.date() == datetime.now(self.tz).date() else dt.strftime("%d %B")
         
-        # Focus on human-interpretable context (not raw numbers)
         nuclear_pct = (record["nucleaire"] / record["consommation"] * 100) if record["consommation"] else 0
         renewable_pct = (
-            (record["eolien"] + record["solaire"] + record["hydraulique"] ) 
+            (record["eolien"] + record["solaire"] + record["hydraulique"] + record.get("bioenergies", 0)) 
             / record["consommation"] * 100
         ) if record["consommation"] else 0
         
         return (
-            f"À {time_str} le {date_str} : "
-            f"consommation = {record['consommation']:,} MW, "
-            f"nucléaire = {nuclear_pct:.0f}%, "
-            f"renouvelables = {renewable_pct:.0f}%, "
-            f"CO₂ = {record['taux_co2']} g/kWh"
+            f"À {time_str} le {date_str} :\n"
+            f"• Consommation : {record['consommation']:,} MW\n"
+            f"• Nucléaire : {nuclear_pct:.0f}% ({record['nucleaire']:,} MW)\n"
+            f"• Renouvelables : {renewable_pct:.0f}%\n"
+            f"• CO₂ : {record['taux_co2']} g/kWh"
         )
     
     def build_for_query(self, inputs: str | dict, time_intent: str | None = None) -> str:
         """
-        Dual-signature: works with both direct calls AND LangChain chains.
-        
-        Usage 1 (direct): build_for_query("quelle est la conso ?", "current")
-        Usage 2 (chain):  build_for_query({"query": "...", "time_intent": "current"})
+        Handle BOTH direct string calls AND chain dict inputs.
+        Chain inputs now use {"input": "..."} (not "query") due to RunnableWithMessageHistory requirements.
         """
-        # Handle LangChain chain input (dict)
+        # 🔑 CRITICAL FIX: Handle both input formats
         if isinstance(inputs, dict):
-            query = inputs["query"]
-            time_intent = inputs.get("time_intent", time_intent)  # Override if provided in dict
+            # Chain input format: {"input": "query text", "time_intent": "..."}
+            query = inputs.get("input", "")  # ← MUST use "input" (not "query")
+            time_intent = inputs.get("time_intent", time_intent)
         else:
-            query = inputs  # Direct string call
-            """Build time-aware context WITHOUT vector search"""
+            # Direct string call (for testing)
+            query = str(inputs)
+        
+        if not query.strip():
+            return "⚠️ Question vide"
+        
         now = datetime.now(self.tz)
         
-        # Rule-based time intent detection (no LLM needed for this)
-        if time_intent == "current" or any(kw in query.lower() for kw in ["maintenant", "actuel", "live", "en temps réel"]):
-            record = self.db.get_latest_record()
-            if not record:
-                return "Aucune donnée récente disponible (dernière mise à jour il y a plus de 15 min)"
-            return f"[Données RTE éCO2mix - mises à jour il y a moins de 15 min]\n{self._format_record(record)}"
-        
-        elif time_intent == "last_hour" or any(kw in query.lower() for kw in ["dernière heure", "ces 60 minutes"]):
-            start = now - timedelta(hours=1)
-            records = self.db.get_time_range(start, now)
-            if not records:
-                return "Données indisponibles pour la dernière heure"
-            snippets = [self._format_record(r) for r in records[-4:]]  # Last 4 quarters
-            return f"[Données RTE éCO2mix - dernière heure]\n" + "\n".join(snippets)
-        
-        elif time_intent == "today" or "aujourd'hui" in query.lower():
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            records = self.db.get_time_range(start, now)
-            if not records:
-                return "Données indisponibles pour aujourd'hui"
-            # Summarize key moments (morning peak, solar max, evening peak)
-            key_times = [6, 12, 19]  # 6am, noon, 7pm
-            snippets = []
-            for hour in key_times:
-                closest = min(records, key=lambda r: abs(datetime.fromisoformat(r["date_heure"]).hour - hour))
-                snippets.append(self._format_record(closest))
-            return f"[Données RTE éCO2mix - synthèse aujourd'hui]\n" + "\n".join(snippets)
-        
-        else:
-            # Default: last 3 hours for general queries
+        # Time intent detection (French + English keywords)
+        query_lower = query.lower()
+        if any(kw in query_lower for kw in ["maintenant", "actuel", "live", "actuelle", "courant", "présent", "current", "now", "real-time"]):
             start = now - timedelta(hours=3)
-            records = self.db.get_all()
+        elif "aujourd'hui" in query_lower or "today" in query_lower:
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif "hier" in query_lower or "yesterday" in query_lower:
+            yesterday = now - timedelta(days=15)
+            start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = yesterday.replace(hour=23, minute=59, second=59)
+            records = self.db.get_time_range(start, end)
             if not records:
-                return "Données historiques non disponibles"
-            return f"[Données RTE éCO2mix - dernières 3 heures]\n" + "\n".join(
-                [self._format_record(r) for r in records[-12:]]  # Last 12 quarters
-            )
+                return "⚠️ Données indisponibles pour hier"
+            # Return summary of yesterday's peak hour
+            peak = max(records, key=lambda r: r["consommation"])
+            return f"Synthèse hier ({peak['date_heure'][:10]}) :\n{self._format_record(peak)}"
+        else:
+            # Default: last 3 hours (safe for ambiguous queries)
+            start = now - timedelta(hours=3)
+        
+        records = self.db.get_time_range(start, now)
+        if not records:
+            return "⚠️ Données énergétiques RTE indisponibles pour la période demandée. Dernière mise à jour il y a plus de 3h."
+        
+        # Return most recent record
+        latest = records[-1]
+        return f"Données RTE éCO2mix (H-2)\n{self._format_record(latest)}"
