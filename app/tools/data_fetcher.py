@@ -41,7 +41,7 @@ class RTEDataFetcher:
         now = datetime.now(self.tz)
 
         # ✅ ALWAYS FETCH LAST 10 DAYS
-        cutoff = now - timedelta(days=10)
+        cutoff = now - timedelta(days=1)
 
         # Convert to UTC for filtering (API expects UTC in WHERE clause)
         cutoff_utc = cutoff.astimezone(pytz.UTC)

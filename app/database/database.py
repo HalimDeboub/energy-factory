@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from app.config.config import DB_PATH, CRITICAL_FIELDS, TIMEZONE
 
@@ -116,21 +116,46 @@ class EnergyDatabase:
         else:
             print("❌ No records in database!")
             
-    # app/database.py → EnergyDatabase class
+    def get_today_records(self):
+        """Get all records from today (00:00 to now)"""
+        tz = pytz.timezone(TIMEZONE)
+        now = datetime.now(tz)
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return self.get_time_range(start, now)
+
+    def get_yesterday_same_hour(self, target_hour: int, window_minutes: int = 30):
+        """Get records from yesterday around same hour (±window_minutes)"""
+        tz = pytz.timezone(TIMEZONE)
+        now = datetime.now(tz)
+        yesterday = now - timedelta(days=1)
+        start = yesterday.replace(hour=target_hour, minute=0, second=0, microsecond=0) - timedelta(minutes=window_minutes)
+        end = yesterday.replace(hour=target_hour, minute=0, second=0, microsecond=0) + timedelta(minutes=window_minutes)
+        print(start, end)
+        return self.get_time_range(start, end)
+
+    def get_historical_same_hour(self, target_hour: int, days_back: int = 7):
+        """Get records for same hour over last N days (for baseline)"""
+        tz = pytz.timezone(TIMEZONE)
+        now = datetime.now(tz)
+        records = []
+        for days_ago in range(1, days_back + 1):
+            target_date = now - timedelta(days=days_ago)
+            start = target_date.replace(hour=target_hour, minute=0, second=0, microsecond=0) - timedelta(minutes=15)
+            end = target_date.replace(hour=target_hour, minute=0, second=0, microsecond=0) + timedelta(minutes=15)
+            hourly_records = self.get_time_range(start, end)
+            if hourly_records:
+                # Take closest record to exact hour
+                closest = min(hourly_records, key=lambda r: abs(
+                    datetime.fromisoformat(r["date_heure"].replace('Z','+00:00')).hour - target_hour
+                ))
+                records.append(closest)
+        return records
+
     def get_record_count(self):
+        """Return total records in database (for diagnostics)"""
         cursor = self.conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM energy_data")
         return cursor.fetchone()[0]
-
     
     
-    
-    
-    # def _validate_timestamp(self, ts: str) -> str:
-    #   """Reject naive timestamps BEFORE storage (fail fast)"""
-    #   if not ts or ('+' not in ts and not ts.endswith('Z')):
-    #     raise ValueError(
-    #         f"❌ CRITICAL: Timestamp missing timezone! Got: '{ts}'. "
-    #         "This breaks all time queries. Fix data_fetcher.py truncation."
-    #     )
-    #   return ts.replace('Z', '+00:00')
+  

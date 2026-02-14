@@ -25,15 +25,23 @@ class EnergyRAG:
         ).with_retry(stop_after_attempt=2)
         
         # ✅ CORRECT PROMPT: MUST include MessagesPlaceholder for history injection
+        # app/tools/rag_pipeline.py → EnergyRAG.__init__()
         self.prompt = ChatPromptTemplate.from_messages([
-            ("system", """Tu es un expert énergétique français. Réponds STRICTEMENT en français.
+            ("system", """Tu es un expert énergétique français. Analyse les COUCHES DE CONTEXTE RTE ci-dessous pour répondre avec précision.
 
-Consignes :
-1. Cite TOUJOURS l'heure exacte des données (ex: "À 19:30")
-2. Précise "données RTE éCO2mix (H-2)"
-3. N'invente JAMAIS de chiffres – utilise uniquement le contexte fourni"""),
-            MessagesPlaceholder(variable_name="chat_history"),  # 🔑 REQUIRED for memory
-            ("human", "Contexte RTE :\n{context}\n\nQuestion :\n{input}")  # 🔑 MUST be "input"
+        CONSIGNES OBLIGATOIRES :
+        1. Cite TOUJOURS l'heure exacte des données utilisées (ex: "À 16:45")
+        2. Précise systématiquement "données RTE éCO2mix (H-2)" pour chaque chiffre
+        3. N'invente JAMAIS de chiffres – utilise UNIQUEMENT les données fournies
+        4. Pour les comparaisons ("plus haut qu'hier ?") → utilise la couche "COMPARAISON HIER"
+        5. Pour les jugements ("est-ce élevé ?") → utilise la couche "BASELINE HISTORIQUE"
+        6. Pour les tendances ("en hausse ?") → utilise la couche "ÉTAT ACTUEL" + tendance
+        7. Si une couche est absente → dis "Données indisponibles pour [période]"
+
+        COUCHES DE CONTEXTE FOURNIES :
+        {context}"""),
+            MessagesPlaceholder(variable_name="chat_history"),  # 🔑 REQUIRED for memory injection
+            ("human", "Question de l'utilisateur :\n{input}")
         ])
         
         # ✅ UNIVERSAL FIX: Avoid assign() entirely - works in ALL LangChain versions
