@@ -193,11 +193,26 @@ class ContextSummarizer:
             f"• Position actuelle : {percentile_desc} ({percentile}e percentile)"
         )
     
+    # app/tools/context_summarizer.py → _fallback_context()
     def _fallback_context(self) -> str:
-        """Fallback when no data available"""
+        """ACTIONABLE fallback when no recent data"""
         count = self.db.get_record_count()
+        latest = self.db.get_latest_record()
+        
+        if latest:
+            ts = self._format_timestamp(latest["date_heure"])
+            # Extract year from timestamp to detect stale data
+            year = latest["date_heure"][:4]
+            if year != "2026":
+                return (
+                    f"⚠️ DONNÉES HISTORIQUES ({year})\n"
+                    f"→ Dernier enregistrement : {ts}\n"
+                    f"→ Les données temps réel RTE sont publiées avec 2h de décalage (H-2)\n"
+                    f"→ Prochaine mise à jour dans ~15 min"
+                )
+        
         return (
-            f"⚠️ DONNÉES LIMITÉES ({count} enregistrements dans la base)\n"
-            f"→ Dernière mise à jour il y a plus de 3h\n"
-            f"→ Les réponses peuvent être basées sur des données non récentes"
+            f"⚠️ BASE DE DONNÉES VIDE ({count} enregistrements)\n"
+            f"→ Démarrez le scheduler : python scheduler.py\n"
+            f"→ Vérifiez le quota API RTE (50k appels/mois)"
         )

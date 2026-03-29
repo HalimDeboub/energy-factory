@@ -36,7 +36,7 @@ with col1:
             try:
                 response = requests.post(
                     f"{api_url}/analyze-energy",
-                    json={"query": query},
+                    json={"query": query,"keep_alive": -1},
                     timeout=500
                 )
                 

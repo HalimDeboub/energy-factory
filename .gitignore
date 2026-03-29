@@ -2,8 +2,11 @@
 *.db
 *.sqlite
 *.env
+*.env.example
 # Ignore API call logs
+.env
 api_calls.json
+energy_data.db
 # Ignore virtual environment folders
 venv/
 env/
@@ -17,3 +20,4 @@ logs/
 *.log
 temp/
 tmp/
+node_modules/

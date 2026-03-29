@@ -7,13 +7,15 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
 from datetime import datetime  # 🔑 For diagnostics
-
+import pytz
 from app.config.config import OLLAMA_HOST, OLLAMA_MODEL
 from app.tools.context_builder import ContextBuilder
+ # For monitoring and debugging
 
 class EnergyRAG:
     def __init__(self):
         self.context_builder = ContextBuilder()
+        
         
         # LLM with retries
         self.llm = OllamaLLM(
@@ -29,14 +31,19 @@ class EnergyRAG:
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", """Tu es un expert énergétique français. Analyse les COUCHES DE CONTEXTE RTE ci-dessous pour répondre avec précision.
 
-        CONSIGNES OBLIGATOIRES :
-        1. Cite TOUJOURS l'heure exacte des données utilisées (ex: "À 16:45")
-        2. Précise systématiquement "données RTE éCO2mix (H-2)" pour chaque chiffre
-        3. N'invente JAMAIS de chiffres – utilise UNIQUEMENT les données fournies
-        4. Pour les comparaisons ("plus haut qu'hier ?") → utilise la couche "COMPARAISON HIER"
-        5. Pour les jugements ("est-ce élevé ?") → utilise la couche "BASELINE HISTORIQUE"
-        6. Pour les tendances ("en hausse ?") → utilise la couche "ÉTAT ACTUEL" + tendance
-        7. Si une couche est absente → dis "Données indisponibles pour [période]"
+        État du système :
+• Données fraîches : {has_fresh_data}  ← STATE FLAG
+    
+Instructions :
+- SI données fraîches = false → Dis "Données non mises à jour depuis X min"
+- N'INVENTE JAMAIS de chiffres pour l'heure actuelle si données non fraîches
+- Utilise uniquement les données fournies dans "Contexte RTE"
+- Si données réelles indisponibles → dis EXACTEMENT :
+   "⚠️ Données temps réel non encore publiées (dernière mesure: il y a X min). 
+    Prochaine mise à jour RTE dans ~15 min."
+-  N'UTILISE JAMAIS "désolé" ou "je ne peux pas"
+- Pour comparaisons → dis "Comparaison indisponible : données historiques non fournies"
+
 
         COUCHES DE CONTEXTE FOURNIES :
         {context}"""),
@@ -55,11 +62,12 @@ class EnergyRAG:
 
         
         # Base chain WITHOUT memory (context retrieval only)
+       # Inside EnergyRAG.__init__() - AFTER base_chain definition
         self.base_chain = (
-            RunnableLambda(add_context)
-            | self.prompt
-            | self.llm
-            | StrOutputParser()  # Clean string output for history saving
+            RunnableLambda(add_context).with_config(run_name="ContextRetrieval")  # 🔑 ADD THIS
+            | self.prompt.with_config(run_name="PromptFormatting")  # 🔑 ADD THIS
+            | self.llm.with_config(run_name="LLMGeneration")  # 🔑 ADD THIS
+            | StrOutputParser().with_config(run_name="OutputParsing")
         )
         
         # In-memory session store (per user/conversation)
@@ -76,11 +84,27 @@ class EnergyRAG:
         return self.chat_histories[session_id]
     
     def query(self, user_query: str, session_id: str = "default", time_intent: Optional[str] = None) -> str:
+        
         """
         Query with conversation memory.
         Memory is ACTIVE when session_id is provided (same session_id = same conversation).
         """
         try:
+            has_fresh_data = False  # Default safe state
+            age_min = None
+            latest = None
+            metadata = {
+                "session_id": session_id,
+                "has_fresh_data": has_fresh_data,
+                "data_age_min": round(age_min, 1) if latest else None,
+                "db_record_count": self.context_builder.summarizer.db.get_record_count(),
+                "time_intent": time_intent or "auto"
+            }
+           
+                        
+                        
+            
+            
             # ✅ CRITICAL: Wrap chain WITH MEMORY on EVERY call
             chain_with_memory = RunnableWithMessageHistory(
                 self.base_chain,
@@ -95,11 +119,24 @@ class EnergyRAG:
             if time_intent:
                 inputs["time_intent"] = time_intent
             
+            latest = self.context_builder.summarizer.db.get_latest_record()
+            if latest:
+                record_time = datetime.fromisoformat(latest["date_heure"].replace('Z','+00:00'))
+                age_min = (datetime.now(pytz.timezone("Africa/Algiers")) - record_time.astimezone(pytz.timezone("Africa/Algiers"))).total_seconds() / 60
+                has_fresh_data = age_min < 420  # Fresh if <2h old
+            else:
+                has_fresh_data = False
+            print(has_fresh_data, age_min)
+
+            # Inject state into prompt
+            inputs["has_fresh_data"] = has_fresh_data
             # ✅ Invoke with session config - THIS TRIGGERS history save/load
             print(f"🔍 Querying with session '{session_id}': '{user_query[:50]}...'")
             result = chain_with_memory.invoke(
                 inputs,
-                config={"configurable": {"session_id": session_id}}
+                config={"configurable": {"session_id": session_id},
+                        "metadata": metadata}
+                
             )
             print(f"✅ Response: '{result[:60]}...'")
             return result

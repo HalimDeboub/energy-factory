@@ -130,7 +130,7 @@ class EnergyDatabase:
         yesterday = now - timedelta(days=1)
         start = yesterday.replace(hour=target_hour, minute=0, second=0, microsecond=0) - timedelta(minutes=window_minutes)
         end = yesterday.replace(hour=target_hour, minute=0, second=0, microsecond=0) + timedelta(minutes=window_minutes)
-        print(start, end)
+      #   print(start, end)
         return self.get_time_range(start, end)
 
     def get_historical_same_hour(self, target_hour: int, days_back: int = 7):
