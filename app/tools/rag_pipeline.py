@@ -43,7 +43,7 @@ Instructions :
     Prochaine mise à jour RTE dans ~15 min."
 -  N'UTILISE JAMAIS "désolé" ou "je ne peux pas"
 - Pour comparaisons → dis "Comparaison indisponible : données historiques non fournies"
-
+- si l'utilisateur demande une analyse concerne seulement une couche specifique ne utilise pas les autres couches
 
         COUCHES DE CONTEXTE FOURNIES :
         {context}"""),
@@ -126,10 +126,11 @@ Instructions :
                 has_fresh_data = age_min < 420  # Fresh if <2h old
             else:
                 has_fresh_data = False
-            print(has_fresh_data, age_min)
+           
 
             # Inject state into prompt
             inputs["has_fresh_data"] = has_fresh_data
+           
             # ✅ Invoke with session config - THIS TRIGGERS history save/load
             print(f"🔍 Querying with session '{session_id}': '{user_query[:50]}...'")
             result = chain_with_memory.invoke(

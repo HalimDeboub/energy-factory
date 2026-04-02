@@ -10,6 +10,9 @@ class ContextBuilder:
         DELEGATE to summarizer – NO time intent parsing here!
         Works for ANY query phrasing because summarizer always provides rich context.
         """
+        
+        
+        
         # Handle both direct string calls AND chain dict inputs
         if isinstance(inputs, dict):
             query = inputs.get("input", "")  # LangChain requires "input" key
@@ -18,6 +21,8 @@ class ContextBuilder:
         
         if not query.strip():
             return "⚠️ Question vide"
+        context = self.summarizer.build_context(query)
         
+        print(context)  # Debug: See full context returned by summarizer
         # ✅ CRITICAL: No parsing – just pass query to summarizer
-        return self.summarizer.build_context(query)
+        return context if context else "⚠️ Contexte indisponible"

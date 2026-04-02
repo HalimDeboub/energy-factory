@@ -7,10 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv() 
 import os
 # Verify LangSmith is configured
-if os.getenv("LANGCHAIN_TRACING_V2") != "true":
-    print("⚠️ LANGCHAIN_TRACING_V2 not enabled! Traces won't appear in LangSmith")
-if not os.getenv("LANGCHAIN_API_KEY"):
-    print("⚠️ LANGCHAIN_API_KEY missing! Get key: https://smith.langchain.com/settings")
+# if os.getenv("LANGCHAIN_TRACING_V2") != "true":
+#     print("⚠️ LANGCHAIN_TRACING_V2 not enabled! Traces won't appear in LangSmith")
+# if not os.getenv("LANGCHAIN_API_KEY"):
+#     print("⚠️ LANGCHAIN_API_KEY missing! Get key: https://smith.langchain.com/settings")
 app = FastAPI(title="🇫🇷 French Energy RAG API")
 # Add CORS middleware
 app.add_middleware(
@@ -64,8 +64,8 @@ async def state_check():
     if latest and latest.get("date_heure"):
         try:
             record_time = datetime.fromisoformat(latest["date_heure"].replace('Z','+00:00'))
-            age_min = (datetime.now(pytz.timezone("Europe/Paris")) - 
-                      record_time.astimezone(pytz.timezone("Europe/Paris"))).total_seconds() / 60
+            age_min = (datetime.now(pytz.timezone("Africa/Algiers")) - 
+                      record_time.astimezone(pytz.timezone("Africa/Algiers"))).total_seconds() / 60
             has_fresh_data = age_min < 120
         except:
             pass

@@ -12,18 +12,27 @@ class ContextSummarizer:
         self.db = EnergyDatabase()
         self.tz = pytz.timezone(TIMEZONE)
         self.now = datetime.now(self.tz)
-    
+       
+    def _get_current_time(self):
+        """ALWAYS get fresh timestamp per query"""
+        return datetime.now(self.tz)
+        
     def build_context(self, query: str) -> str:
+        
         """
         ALWAYS retrieve all 4 layers – no intent parsing!
         Let the LLM decide which layers are relevant for the query.
         """
+        now = self._get_current_time()  # ✅ FRESH TIMESTAMP
+        
         layers = [
-            self._layer_immediate(),
-            self._layer_today_pattern(),
-            self._layer_yesterday_comparison(),
-            self._layer_historical_baseline(),
+            self._layer_immediate(now),
+            self._layer_today_pattern(now),
+            self._layer_yesterday_comparison(now),
+            self._layer_historical_baseline(now),
         ]
+        print(layers)
+
         # Filter out empty layers (e.g., no historical data yet)
         non_empty = [layer for layer in layers if layer]
         return "\n\n".join(non_empty) if non_empty else self._fallback_context()
@@ -62,17 +71,24 @@ class ContextSummarizer:
         else:
             return f"↓ {abs(change_pct):.0f}%"
     
-    def _layer_immediate(self) -> str:
-        """Layer 1: Current state (last 3 hours)"""
-        start = self.now - timedelta(hours=3)
-        records = self.db.get_time_range(start, self.now)
+    def _layer_immediate(self, now: datetime) -> str:  # ✅ PASS FRESH TIMESTAMP
+        start = now - timedelta(hours=7)
+        print(start)
+        records = self.db.get_time_range(start, now)
         if not records:
             return ""
         
         latest = records[-1]
-        trend = self._compute_trend(records[-4:])  # Last 4 quarters (1h trend)
+        # 🔑 CRITICAL: ONLY use REAL consumption (skip forecast-only records)
+        if latest.get("consommation") is None:
+            
+            # Find most recent record WITH real consumption
+            real_records = [r for r in records if r.get("consommation") is not None]
+            if not real_records:
+                return "⚠️ DONNÉES RÉELLES TEMPORAIREMENT INDISPONIBLES (dernière mesure: il y a >2h)"
+            latest = real_records[-1]
         
-        # Compute renewable share
+        trend = self._compute_trend(records[-4:]) if len(records) >= 4 else "insuffisant"
         renewables = sum([
             latest.get("eolien", 0),
             latest.get("solaire", 0),
@@ -94,8 +110,8 @@ class ContextSummarizer:
             f"• CO₂ : {latest.get('taux_co2', 'N/A')} g/kWh\n"
             f"• Tendance (1h) : {trend}"
         )
-    
-    def _layer_today_pattern(self) -> str:
+        
+    def _layer_today_pattern(self, now: datetime) -> str:
         """Layer 2: Today's energy patterns (min/max/peak + periods)"""
         records = self.db.get_today_records()
         if len(records) < 10:  # Need at least 2.5h of data
@@ -123,16 +139,18 @@ class ContextSummarizer:
             f"{max(r.get('nucleaire',0) for r in records):,} MW"
         )
     
-    def _layer_yesterday_comparison(self) -> str:
+    def _layer_yesterday_comparison(self, now: datetime) -> str:
         """Layer 3: Yesterday same hour comparison"""
         current_hour = self.now.hour
         yesterday_records = self.db.get_yesterday_same_hour(current_hour, window_minutes=30)
         today_records = self.db.get_time_range(
-            self.now - timedelta(hours=1),
+            self.now - timedelta(hours=7),
             self.now
         )
         
+
         if not yesterday_records or not today_records:
+            
             return ""
         
         # Get representative values (closest to exact hour)
@@ -152,7 +170,7 @@ class ContextSummarizer:
             f"• Variation : {delta_str}"
         )
     
-    def _layer_historical_baseline(self) -> str:
+    def _layer_historical_baseline(self, now: datetime) -> str:
         """Layer 4: 7-day historical baseline for 'high/low' judgments"""
         current_hour = self.now.hour
         history = self.db.get_historical_same_hour(current_hour, days_back=7)
@@ -194,25 +212,18 @@ class ContextSummarizer:
         )
     
     # app/tools/context_summarizer.py → _fallback_context()
-    def _fallback_context(self) -> str:
-        """ACTIONABLE fallback when no recent data"""
+    def _fallback_context(self, now: datetime) -> str:
         count = self.db.get_record_count()
         latest = self.db.get_latest_record()
-        
-        if latest:
+        if latest and latest.get("consommation") is not None:
             ts = self._format_timestamp(latest["date_heure"])
-            # Extract year from timestamp to detect stale data
-            year = latest["date_heure"][:4]
-            if year != "2026":
-                return (
-                    f"⚠️ DONNÉES HISTORIQUES ({year})\n"
-                    f"→ Dernier enregistrement : {ts}\n"
-                    f"→ Les données temps réel RTE sont publiées avec 2h de décalage (H-2)\n"
-                    f"→ Prochaine mise à jour dans ~15 min"
-                )
-        
+            age_min = (now - datetime.fromisoformat(latest["date_heure"].replace('Z','+00:00')).astimezone(self.tz)).total_seconds() / 60
+            return (
+                f"⚠️ DONNÉES PARTIELLES ({count} enregistrements)\n"
+                f"• Dernière donnée réelle : {ts} (il y a {age_min:.0f} min)\n"
+                f"• Statut : Mesures réelles disponibles"
+            )
         return (
             f"⚠️ BASE DE DONNÉES VIDE ({count} enregistrements)\n"
-            f"→ Démarrez le scheduler : python scheduler.py\n"
-            f"→ Vérifiez le quota API RTE (50k appels/mois)"
-        )
+            f"→ Démarrez le scheduler : python scheduler.py"
+    )
