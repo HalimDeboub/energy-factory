@@ -1,6 +1,6 @@
 📌 Project Overview
 
-France Energy AI Analyst is an open-source, multi-agent AI system that analyzes France’s real-time electricity grid data using the official eco2mix API.
+EcoBot Energy AI Analyst is an open-source, multi-agent AI system that analyzes real-time electricity grid data using the official eco2mix API.
 
 The system uses:
 
@@ -45,11 +45,6 @@ Is wind compensating for low hydro?
 What is the carbon impact right now?
 
 Displays results via API + dashboard
-
-📊 Data Source: eco2mix (Official France Grid Data)
-
-API:
-https://odre.opendatasoft.com/api/explore/v2.1/catalog/datasets/eco2mix-national-tr/records
 
 What it provides:
 

@@ -23,7 +23,7 @@ class Eco2mixDataTools:
         
     @tool
     def get_real_time_data(self, limit: int = 10) -> str:
-        """Fetch real-time energy data from France's grid"""
+        """Fetch real-time energy data from data's grid"""
         params = {
             "limit": limit,
             "order_by": "date desc",

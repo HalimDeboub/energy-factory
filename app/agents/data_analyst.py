@@ -67,7 +67,7 @@ class DataAnalystAgent:
             Tool(
                 name="get_real_time_data",
                 func=self.data_tools.get_real_time_data,
-                description="Get real-time energy data from France's grid"
+                description="Get real-time energy data from data grid"
             ),
             Tool(
                 name="get_energy_mix",
@@ -77,7 +77,7 @@ class DataAnalystAgent:
         ]
         
         # Create prompt
-        prompt_template = """You are a Data Analyst specializing in France's electricity grid.
+        prompt_template = """You are a Data Analyst specializing in data electricity grid.
         
         Available tools:
         {tools}

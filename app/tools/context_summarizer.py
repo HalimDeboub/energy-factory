@@ -29,7 +29,8 @@ class ContextSummarizer:
             self._layer_immediate(now),
             self._layer_today_pattern(now),
             self._layer_yesterday_comparison(now),
-            self._layer_historical_baseline(now),
+            self._layer_short_term_historical_baseline(now),
+           # self._layer_long_term_historical_baseline(now),
         ]
         print(layers)
 
@@ -38,18 +39,18 @@ class ContextSummarizer:
         return "\n\n".join(non_empty) if non_empty else self._fallback_context()
     
     def _format_number(self, value: Optional[int]) -> str:
-        """French number formatting: 32450 → '32 450'"""
+        """ number formatting: 32450 → '32 450'"""
         if value is None or value == 0:
             return "N/A"
         return f"{value:,}".replace(",", " ")
     
     def _format_timestamp(self, ts: str) -> str:
-        """Convert ISO8601 to human-readable French time"""
+        """Convert ISO8601 to human-readable time"""
         try:
             dt = datetime.fromisoformat(ts.replace('Z', '+00:00')).astimezone(self.tz)
             time_str = dt.strftime("%H:%M")
-            date_str = "aujourd'hui" if dt.date() == self.now.date() else dt.strftime("%d %B")
-            return f"{time_str} le {date_str}"
+            date_str = "today" if dt.date() == self.now.date() else dt.strftime("%d %B")
+            return f"{time_str} on {date_str}"
         except:
             return ts[:16]
     
@@ -99,14 +100,14 @@ class ContextSummarizer:
         renewable_pct = (renewables / total * 100) if total else 0
         
         return (
-            f"🔴 ÉTAT ACTUEL (dernières 3h):\n"
+            f"🔴 CURRENT STATUS (last 3 hours):\n"
             f"• {self._format_timestamp(latest['date_heure'])} : "
             f"{self._format_number(latest.get('consommation'))} MW consommation\n"
-            f"• Nucléaire : {self._format_number(latest.get('nucleaire'))} MW "
+            f"• Nucleair : {self._format_number(latest.get('nucleaire'))} MW "
             f"({latest.get('nucleaire',0)/total*100:.0f}%)\n"
-            f"• Renouvelables : {renewable_pct:.0f}% "
-            f"(Éolien {self._format_number(latest.get('eolien'))} MW, "
-            f"Solaire {self._format_number(latest.get('solaire'))} MW)\n"
+            f"• renewable : {renewable_pct:.0f}% "
+            f"(Eolien {self._format_number(latest.get('eolien'))} MW, "
+            f"Solair {self._format_number(latest.get('solaire'))} MW)\n"
             f"• CO₂ : {latest.get('taux_co2', 'N/A')} g/kWh\n"
             f"• Tendance (1h) : {trend}"
         )
@@ -129,12 +130,12 @@ class ContextSummarizer:
         evening_avg = sum(r.get("consommation",0) for r in evening) / len(evening) if evening else 0
         
         return (
-            f"📊 PROFIL D'AUJOURD'HUI:\n"
+            f"📊 TODAY'S PROFILE:\n"
             f"• Pic de consommation : {self._format_number(peak.get('consommation'))} MW "
             f"à {self._format_timestamp(peak['date_heure'])}\n"
-            f"• Moyenne matinale (6h-12h) : {self._format_number(int(morning_avg))} MW\n"
-            f"• Moyenne soirée (18h-22h) : {self._format_number(int(evening_avg))} MW\n"
-            f"• Production nucléaire stable : "
+            f"• Morning average (6h-12h) : {self._format_number(int(morning_avg))} MW\n"
+            f"• Evening average (18h-22h) : {self._format_number(int(evening_avg))} MW\n"
+            f"• Stable nuclear production : "
             f"{min(r.get('nucleaire',0) for r in records):,} → "
             f"{max(r.get('nucleaire',0) for r in records):,} MW"
         )
@@ -164,16 +165,16 @@ class ContextSummarizer:
         delta_str = f"+{delta_pct:.0f}%" if delta_pct > 0 else f"{delta_pct:.0f}%"
         
         return (
-            f"🔄 COMPARAISON HIER (même heure ±30min):\n"
-            f"• Maintenant : {self._format_number(today_val)} MW nucléaire\n"
-            f"• Hier à la même heure : {self._format_number(yesterday_val)} MW\n"
+            f"🔄 COMPARISON YESTERDAY (same time ±30min):\n"
+            f"• NOW : {self._format_number(today_val)} MW nucléaire\n"
+            f"• Yesterday at the same time : {self._format_number(yesterday_val)} MW\n"
             f"• Variation : {delta_str}"
         )
     
-    def _layer_historical_baseline(self, now: datetime) -> str:
-        """Layer 4: 7-day historical baseline for 'high/low' judgments"""
+    def _layer_short_term_historical_baseline(self, now: datetime) -> str:
+        """Layer 4: layer short term historical baseline 10-day historical baseline for 'high/low' judgments"""
         current_hour = self.now.hour
-        history = self.db.get_historical_same_hour(current_hour, days_back=7)
+        history = self.db.get_historical_same_hour(current_hour, days_back=10)
         
         if len(history) < 3:  # Need at least 3 days for meaningful baseline
             return ""
@@ -195,20 +196,62 @@ class ContextSummarizer:
             below = sum(1 for v in nuclear_vals if v < current_val)
             percentile = int((below / len(nuclear_vals)) * 100)
             percentile_desc = (
-                "très élevé" if percentile >= 90 else
-                "élevé" if percentile >= 75 else
-                "moyen" if percentile >= 25 else
-                "bas" if percentile >= 10 else
-                "très bas"
+                "very high" if percentile >= 90 else
+                "high" if percentile >= 75 else
+                "average" if percentile >= 25 else
+                "low" if percentile >= 10 else
+                "very low"
             )
         else:
             percentile_desc = "N/A"
         
         return (
-            f"📈 BASELINE HISTORIQUE (7 derniers jours, même heure):\n"
-            f"• Moyenne nucléaire : {self._format_number(int(avg))} MW\n"
+            f"📈 BASELINE HISTORIQUE (10 last days, same hour):\n"
+            f"• Average nuclear production : {self._format_number(int(avg))} MW\n"
             f"• Minimum : {self._format_number(min_val)} MW | Maximum : {self._format_number(max_val)} MW\n"
-            f"• Position actuelle : {percentile_desc} ({percentile}e percentile)"
+            f"• Current position : {percentile_desc} ({percentile}e percentile)"
+        )
+    
+    
+    def _layer_long_term_historical_baseline(self, now: datetime) -> str:
+        """Layer 5: layer long term historical baseline 30-day historical baseline for 'high/low' judgments"""
+        current_hour = self.now.hour
+        history = self.db.get_historical_same_hour(current_hour, days_back=30)
+        
+        if len(history) < 3:  # Need at least 3 days for meaningful baseline
+            return ""
+        
+        nuclear_vals = [r.get("nucleaire", 0) for r in history if r.get("nucleaire")]
+        if not nuclear_vals:
+            return ""
+        
+        avg = sum(nuclear_vals) / len(nuclear_vals)
+        min_val = min(nuclear_vals)
+        max_val = max(nuclear_vals)
+        
+        # Get current value for percentile calculation
+        latest = self.db.get_latest_record()
+        current_val = latest.get("nucleaire", 0) if latest else 0
+        
+        if current_val:
+            # Simple percentile approximation
+            below = sum(1 for v in nuclear_vals if v < current_val)
+            percentile = int((below / len(nuclear_vals)) * 100)
+            percentile_desc = (
+                "very high" if percentile >= 90 else
+                "high" if percentile >= 75 else
+                "average" if percentile >= 25 else
+                "low" if percentile >= 10 else
+                "very low"
+            )
+        else:
+            percentile_desc = "N/A"
+        
+        return (
+            f"📈 BASELINE HISTORIQUE (10 last days, same hour):\n"
+            f"• Average nuclear production : {self._format_number(int(avg))} MW\n"
+            f"• Minimum : {self._format_number(min_val)} MW | Maximum : {self._format_number(max_val)} MW\n"
+            f"• Current position : {percentile_desc} ({percentile}e percentile)"
         )
     
     # app/tools/context_summarizer.py → _fallback_context()
@@ -219,11 +262,11 @@ class ContextSummarizer:
             ts = self._format_timestamp(latest["date_heure"])
             age_min = (now - datetime.fromisoformat(latest["date_heure"].replace('Z','+00:00')).astimezone(self.tz)).total_seconds() / 60
             return (
-                f"⚠️ DONNÉES PARTIELLES ({count} enregistrements)\n"
-                f"• Dernière donnée réelle : {ts} (il y a {age_min:.0f} min)\n"
-                f"• Statut : Mesures réelles disponibles"
+                f"⚠️ PARTIAL DATA ({count} records)\n"
+                f"• Last real data : {ts} ( {age_min:.0f} min ago)\n"
+                f"• Status : Real measurements available but data is sparse. Context may be incomplete."
             )
         return (
-            f"⚠️ BASE DE DONNÉES VIDE ({count} enregistrements)\n"
-            f"→ Démarrez le scheduler : python scheduler.py"
-    )
+            f"⚠️ db is empty ({count} records)\n"
+            f"→ Start the scheduler : python scheduler.py"
+        )

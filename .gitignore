@@ -12,6 +12,7 @@ venv/
 env/
 # Ignore IDE/editor specific files
 .vscode/
+config.py
 .idea/
 *.pyc
 __pycache__/

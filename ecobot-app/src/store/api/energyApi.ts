@@ -27,12 +27,59 @@ interface EnergyAnalysisResponse {
   };
 }
 
+interface InsightsMetrics {
+  co2_saved_kg: number;
+  current_consumption_kwh: number;
+  solar_efficiency_percent: number;
+  period: string;
+  timestamp: string;
+}
+
+interface InsightsMetricsResponse {
+  status: string;
+  metrics: InsightsMetrics;
+}
+
+interface EnergyDataPoint {
+  time: string;
+  consommation: number;
+  nucleaire?: number;
+  eolien?: number;
+  solaire?: number;
+  hydraulique?: number;
+  gaz?: number;
+  taux_co2?: number;
+}
+
+interface EnergyHistoryResponse {
+  status: string;
+  data: EnergyDataPoint[];
+  period: string;
+}
+
+interface EnergyMix {
+  nucleaire: number;
+  eolien: number;
+  solaire: number;
+  hydraulique: number;
+  gaz: number;
+  total_production: number;
+  consommation: number;
+  taux_co2: number;
+  timestamp: string;
+}
+
+interface EnergyMixResponse {
+  status: string;
+  mix: EnergyMix;
+}
+
 export const energyApi = createApi({
   reducerPath: "energyApi",
   baseQuery: fetchBaseQuery({
     baseUrl: "http://localhost:9000",
   }),
-  tagTypes: ["Energy", "Health"],
+  tagTypes: ["Energy", "Health", "Insights"],
   endpoints: (builder) => ({
     // GET /health
     getHealth: builder.query<HealthResponse, void>({
@@ -52,7 +99,34 @@ export const energyApi = createApi({
       }),
       invalidatesTags: ["Energy"],
     }),
+    // GET /insights/metrics - Get aggregated insights metrics
+    getInsightsMetrics: builder.query<InsightsMetricsResponse, string | void>({
+      query: (period = "today") => `/insights/metrics?period=${period}`,
+      providesTags: ["Insights"],
+    }),
+
+    // GET /insights/history - Get historical energy data for graphs
+    getEnergyHistory: builder.query<
+      EnergyHistoryResponse,
+      { period?: string; interval?: string }
+    >({
+      query: ({ period = "24h", interval = "1h" }) =>
+        `/insights/history?period=${period}&interval=${interval}`,
+      providesTags: ["Insights"],
+    }),
+
+    // GET /insights/energy-mix - Get current energy mix breakdown
+    getEnergyMix: builder.query<EnergyMixResponse, void>({
+      query: () => "/insights/energy-mix",
+      providesTags: ["Insights"],
+    }),
   }),
 });
 
-export const { useGetHealthQuery, useAnalyzeEnergyMutation } = energyApi;
+export const {
+  useGetHealthQuery,
+  useAnalyzeEnergyMutation,
+  useGetEnergyHistoryQuery,
+  useGetEnergyMixQuery,
+  useGetInsightsMetricsQuery,
+} = energyApi;

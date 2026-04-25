@@ -133,7 +133,7 @@ class EnergyDatabase:
       #   print(start, end)
         return self.get_time_range(start, end)
 
-    def get_historical_same_hour(self, target_hour: int, days_back: int = 7):
+    def get_historical_same_hour(self, target_hour: int, days_back: int = 10):
         """Get records for same hour over last N days (for baseline)"""
         tz = pytz.timezone(TIMEZONE)
         now = datetime.now(tz)

@@ -28,10 +28,23 @@ export function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [analyzeEnergy, { isLoading }] = useAnalyzeEnergyMutation();
-
-  // Auto-scroll to bottom when new messages arrive
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  // Auto-scroll to bottom when new messages arrive or during typing
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const scrollToBottom = () => {
+      if (messagesContainerRef.current) {
+        messagesContainerRef.current.scrollTop =
+          messagesContainerRef.current.scrollHeight;
+      }
+    };
+
+    // Scroll immediately
+    scrollToBottom();
+
+    // Continue scrolling during typewriter animation
+    const intervalId = setInterval(scrollToBottom, 100);
+
+    return () => clearInterval(intervalId);
   }, [messages, isLoading]);
 
   const handleSend = async () => {
@@ -92,9 +105,13 @@ export function Chat() {
   return (
     <div className="flex h-full">
       {/* Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex flex-col flex-1">
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div
+          ref={messagesContainerRef}
+          className="flex-1 p-6 space-y-4 overflow-y-auto"
+        >
+          {" "}
           {messages.map((message, index) => (
             <MessageBubble
               key={message.id}
@@ -102,16 +119,14 @@ export function Chat() {
               isLatest={index === messages.length - 1}
             />
           ))}
-
           {/* Typing indicator */}
           {isLoading && <TypingIndicator />}
-
           <div ref={messagesEndRef} />
         </div>
 
         {/* Input Area */}
-        <div className="border-t border-gray-200 bg-white p-4">
-          <div className="flex gap-2 max-w-4xl mx-auto">
+        <div className="p-4 bg-white border-t border-gray-200">
+          <div className="flex max-w-4xl gap-2 mx-auto">
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
