@@ -17,26 +17,47 @@ class ContextSummarizer:
         """ALWAYS get fresh timestamp per query"""
         return datetime.now(self.tz)
         
-    def build_context(self, query: str) -> str:
+    # def build_context(self, query: str) -> str:
         
-        """
-        ALWAYS retrieve all 4 layers – no intent parsing!
-        Let the LLM decide which layers are relevant for the query.
-        """
-        now = self._get_current_time()  # ✅ FRESH TIMESTAMP
+    #     """
+    #     ALWAYS retrieve all 4 layers – no intent parsing!
+    #     Let the LLM decide which layers are relevant for the query.
+    #     """
+    #     now = self._get_current_time()  # ✅ FRESH TIMESTAMP
         
-        layers = [
-            self._layer_immediate(now),
-            self._layer_today_pattern(now),
-            self._layer_yesterday_comparison(now),
-            self._layer_short_term_historical_baseline(now),
-           # self._layer_long_term_historical_baseline(now),
-        ]
-        print(layers)
+    #     layers = [
+    #         self._layer_immediate(now),
+    #         self._layer_today_pattern(now),
+    #         self._layer_yesterday_comparison(now),
+    #         self._layer_short_term_historical_baseline(now),
+    #        # self._layer_long_term_historical_baseline(now),
+    #     ]
+    #     print(layers)
 
-        # Filter out empty layers (e.g., no historical data yet)
-        non_empty = [layer for layer in layers if layer]
-        return "\n\n".join(non_empty) if non_empty else self._fallback_context()
+    #     # Filter out empty layers (e.g., no historical data yet)
+    #     non_empty = [layer for layer in layers if layer]
+    #     return "\n\n".join(non_empty) if non_empty else self._fallback_context()
+    
+    def build_context(self, query: str, layers: list[str]) -> str:
+        now = self._get_current_time()
+
+        layer_map = {
+            "realtime": self._layer_immediate,
+            "today": self._layer_today_pattern,
+            "yesterday": self._layer_yesterday_comparison,
+            "last_7_days": self._layer_short_term_historical_baseline,
+            "last_30_days": self._layer_long_term_historical_baseline,
+        }
+
+        selected_layers = []
+
+        for layer in layers:
+            if layer in layer_map:
+                result = layer_map[layer](now)
+                if result:
+                    selected_layers.append(result)
+
+        return "\n\n".join(selected_layers) if selected_layers else self._fallback_context(now)
     
     def _format_number(self, value: Optional[int]) -> str:
         """ number formatting: 32450 → '32 450'"""
