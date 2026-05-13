@@ -13,6 +13,9 @@ interface Message {
   content: string;
 }
 
+import { Zap, Clock, Database } from "lucide-react"; // NEW
+import { Badge } from "../components/ui/badge"; // NEW
+
 const initialMessages: Message[] = [
   {
     id: "2",
@@ -106,6 +109,25 @@ export function Chat() {
     <div className="flex h-full">
       {/* Chat Area */}
       <div className="flex flex-col flex-1">
+        {/* NEW: Performance Monitor Bar */}
+        <div className="flex items-center justify-between px-6 py-2 bg-gray-50 border-b border-gray-200">
+          <div className="flex items-center gap-4 text-xs font-medium text-gray-500">
+            <span className="flex items-center gap-1.5">
+              <Zap className="size-3 text-yellow-500" />
+              Engine: <span className="text-gray-700">Modular RAG v2</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Database className="size-3 text-blue-500" />
+              Cache: <span className="text-gray-700">Active</span>
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+             <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+               Optimized
+             </Badge>
+          </div>
+        </div>
+
         {/* Messages */}
         <div
           ref={messagesContainerRef}

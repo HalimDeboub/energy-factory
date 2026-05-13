@@ -1,0 +1,20 @@
+{
+    "data_sources": [
+        {
+            "id": "rte_france",
+            "name": "RTE France (Manual)",
+            "type": "rest_api",
+            "base_url": "https://odre.opendatasoft.com/api/explore/v2.1/catalog/datasets/eco2mix-national-tr/records",
+            "metrics": ["consommation", "nucleaire", "eolien"],
+            "enabled": true
+        }
+    ],
+    "knowledge_sources": [
+        {
+            "id": "strategy_reports",
+            "name": "Local Energy Reports",
+            "path": "data/uploads/reports",
+            "enabled": true
+        }
+    ]
+}

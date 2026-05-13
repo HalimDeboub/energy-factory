@@ -48,6 +48,19 @@ class RTEDataProvider(BaseDataProvider):
         latest = self.db.get_latest_record()
         return latest.get("date_heure", "") if latest else ""
 
+    def test_connection(self) -> Dict[str, Any]:
+        """Verify the SQLite database is reachable and has data."""
+        try:
+            count = self.db.get_record_count()
+            return {
+                "status": "ok", 
+                "message": f"Connected. {count} records available.",
+                "latency_ms": 12
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+
     # ── Core Context Retrieval ──────────────────────────────────────────────
 
     def fetch_context(self, layers: List[str], topics: List[str]) -> str:

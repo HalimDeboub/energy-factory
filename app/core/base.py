@@ -51,6 +51,15 @@ class BaseDataProvider(ABC):
         """Returns the timestamp of the newest record (for cache invalidation)."""
         pass
 
+    @abstractmethod
+    def test_connection(self) -> Dict[str, Any]:
+        """
+        Tests if the source is reachable.
+        Returns: {"status": "ok" | "error", "message": str, "latency_ms": int}
+        """
+        pass
+
+
 
 class BaseKnowledgeProvider(ABC):
     """

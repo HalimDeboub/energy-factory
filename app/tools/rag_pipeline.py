@@ -213,8 +213,7 @@ import pytz
 
 from app.config.config import OLLAMA_HOST, OLLAMA_MODEL, FETCH_INTERVAL_MINUTES
 from app.core.dispatcher import ContextDispatcher
-from app.providers.data.rte_provider import RTEDataProvider
-from app.providers.knowledge.pdf_provider import PDFKnowledgeProvider
+from app.core.registry import ProviderRegistry
 from app.agents.time_intent_parser import TimeIntentParser, FALLBACK_INTENT
 from app.tools.response_cache import ResponseCache
 from app.tools.query_logger import QueryLogger, QueryTimer
@@ -223,12 +222,16 @@ from app.agents.topic_intent_parser import TopicIntentParser
 
 class EnergyRAG:
     def __init__(self):
-        # ── Data & Knowledge Providers ────────────────────────────────────
-        # These are the "Sources" our tool can talk to.
-        # To add a new country or source, just add a new provider here.
+        # ── Dynamic Provider Discovery ───────────────────────────────────
+        # Automatically finds and loads every provider in:
+        #   - app/providers/data/
+        #   - app/providers/knowledge/
+        #
+        # No more hardcoded imports! Drop a new file in those folders to
+        # expand the system.
         self.dispatcher = ContextDispatcher(
-            data_providers=[RTEDataProvider()],
-            knowledge_providers=[PDFKnowledgeProvider()]
+            data_providers=ProviderRegistry.load_all_data_providers(),
+            knowledge_providers=ProviderRegistry.load_all_knowledge_providers()
         )
 
         self.llm = OllamaLLM(

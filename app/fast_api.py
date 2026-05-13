@@ -4,7 +4,7 @@ from app.tools.rag_pipeline import EnergyRAG
 from datetime import datetime
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
+from typing import List, Any
 from contextlib import contextmanager
 import sqlite3
 import pytz
@@ -60,6 +60,20 @@ class InsightsMetrics(BaseModel):
 class InsightsMetricsResponse(BaseModel):
     status: str
     metrics: InsightsMetrics
+
+class DataSourceConfig(BaseModel):
+    id: str
+    name: str
+    type: str  # "rest_api", "iot", "database"
+    enabled: bool
+    url: str | None = None
+    topic: str | None = None
+    connection_string: str | None = None
+    metrics: List[str] = []
+
+class SourcesResponse(BaseModel):
+    data_sources: List[DataSourceConfig]
+    knowledge_sources: List[Any]
 
 class EnergyDataPoint(BaseModel):
     time: str
@@ -120,34 +134,95 @@ async def health():
 
 @app.get("/debug/state-check")
 async def state_check():
-    """Verify state flags compute correctly"""
-    rag = EnergyRAG()
-    latest = rag.context_builder.summarizer.db.get_latest_record()
+    """Verify modular framework state"""
+    try:
+        data_providers = [p.provider_name for p in rag.dispatcher.data_providers]
+        knowledge_providers = [p.provider_name for p in rag.dispatcher.knowledge_providers]
+        
+        # Get latest timestamp across ALL data providers
+        latest_ts = "N/A"
+        all_timestamps = []
+        for p in rag.dispatcher.data_providers:
+            ts = p.get_latest_timestamp()
+            if ts:
+                all_timestamps.append(ts)
+        
+        if all_timestamps:
+            # Sort as strings (ISO8601) and take the last one
+            latest_ts = sorted(all_timestamps)[-1]
+
+        return {
+            "status": "ready",
+            "framework": "Modular Energy RAG v2",
+            "active_data_providers": data_providers,
+            "active_knowledge_providers": knowledge_providers,
+            "latest_data_sync": latest_ts,
+            "cache_stats": rag.cache.stats
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/sources", response_model=SourcesResponse)
+async def get_sources():
+    """List all registered data and knowledge sources"""
+    from app.config.sources import CONFIG_PATH
+    import json
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, 'r') as f:
+            return json.load(f)
+    return {"data_sources": [], "knowledge_sources": []}
+
+@app.post("/sources")
+async def add_source(source: DataSourceConfig):
+    """Add a new data source dynamically via the UI"""
+    from app.config.sources import CONFIG_PATH
+    import json
     
-    # Replicate EXACT logic from query() method
-    has_fresh_data = False
-    age_min = None
-    if latest and latest.get("date_heure"):
-        try:
-            record_time = datetime.fromisoformat(latest["date_heure"].replace('Z','+00:00'))
-            age_min = (datetime.now(pytz.timezone("Africa/Algiers")) - 
-                      record_time.astimezone(pytz.timezone("Africa/Algiers"))).total_seconds() / 60
-            has_fresh_data = age_min < 120
-        except:
-            pass
+    config = {"data_sources": [], "knowledge_sources": []}
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, 'r') as f:
+            config = json.load(f)
     
+    # Check if ID already exists
+    if any(s['id'] == source.id for s in config['data_sources']):
+         raise HTTPException(status_code=400, detail="Source ID already exists")
+
+    config['data_sources'].append(source.dict())
+    
+    with open(CONFIG_PATH, 'w') as f:
+        json.dump(config, f, indent=4)
+        
+    return {"status": "success", "message": f"Source '{source.name}' added successfully"}
+
+@app.post("/sources/{source_id}/test")
+async def test_source_connection(source_id: str):
+    """Trigger a live connection test for a specific provider"""
+    # 1. Find provider in the active dispatcher
+    provider = next((p for p in rag.dispatcher.data_providers if p.provider_name.lower().replace(" ", "_") == source_id or getattr(p, '_active_source', {}).get('id') == source_id), None)
+    
+    if not provider:
+        # Fallback to RTE if ID matches (special case for hardcoded provider)
+        if source_id == "rte_france" or source_id == "rte_france_(eco2mix)":
+             provider = next((p for p in rag.dispatcher.data_providers if "RTE" in p.provider_name), None)
+
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found or not initialized")
+    
+    return provider.test_connection()
+
+@app.get("/performance")
+async def get_performance_stats():
+    """Get cache hits, misses, and average latency"""
     return {
-        "has_fresh_data": has_fresh_data,
-        "data_age_min": round(age_min, 1) if age_min else None,
-        "latest_record": latest,
-        "db_record_count": rag.context_builder.summarizer.db.get_record_count()
+        "cache": rag.cache.stats,
+        "logs_path": "logs/query_log.jsonl"
     }
 
 # NEW: Insights endpoints
 @app.get("/insights/metrics", response_model=InsightsMetricsResponse)
 async def get_insights_metrics():
     """
-    Get key energy metrics: CO₂ saved, energy usage, and solar output
+    Get key energy metrics: CO2 saved, energy usage, and solar output
     """
     try:
         with get_db() as conn:
@@ -330,6 +405,46 @@ async def get_energy_mix():
     except Exception as e:
         print(f"❌ Error in /insights/energy-mix: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/reports/ai-summary")
+async def get_ai_summary():
+    """Generate an AI-driven summary of the last 24 hours of energy data"""
+    try:
+        # 1. Get data for the last 24h
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT AVG(consommation) as avg_cons, MAX(consommation) as max_cons,
+                       SUM(solaire) as total_solar, AVG(taux_co2) as avg_co2
+                FROM energy_data
+                WHERE date_heure >= datetime('now', '-24 hours')
+            """)
+            summary_stats = cursor.fetchone()
+
+        # 2. Construct a prompt for the RAG
+        stats_text = (
+            f"Last 24h Stats:\n"
+            f"- Average Consumption: {round(summary_stats['avg_cons'] or 0, 2)} MW\n"
+            f"- Peak Demand: {round(summary_stats['max_cons'] or 0, 2)} MW\n"
+            f"- Total Solar Contribution: {round(summary_stats['total_solar'] or 0, 2)} MW\n"
+            f"- Average CO2 Intensity: {round(summary_stats['avg_co2'] or 0, 2)} g/kWh"
+        )
+
+        query = f"Provide a professional executive summary of the following energy performance: {stats_text}. Mention trends and recommendations for the transition."
+        
+        answer = rag.query(
+            user_query=query,
+            session_id="reporting_agent"
+        )
+
+        return {
+            "status": "success",
+            "summary": answer,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        print(f"❌ Error generating AI report: {str(e)}")
+        return {"status": "error", "message": "Failed to generate AI report"}
 
 if __name__ == "__main__":
     import uvicorn
