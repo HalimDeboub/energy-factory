@@ -276,7 +276,7 @@ class TimeIntentParser:
             confidence = self._clamp_confidence(data.get("confidence", 0.5))
 
             if not time_range:
-                print(f"⚠️ [TimeIntentParser/LLM] No valid layers, using fallback. Raw: {data}")
+                print(f" [TimeIntentParser/LLM] No valid layers, using fallback. Raw: {data}")
                 return {**FALLBACK_INTENT}
 
             return {
@@ -285,7 +285,7 @@ class TimeIntentParser:
                 "confidence": confidence,
             }
         except Exception as exc:
-            print(f"⚠️ [TimeIntentParser/LLM] Failed ({type(exc).__name__}: {exc}), using fallback.")
+            print(f" [TimeIntentParser/LLM] Failed ({type(exc).__name__}: {exc}), using fallback.")
             return {**FALLBACK_INTENT}
 
     # ------------------------------------------------------------------
@@ -308,11 +308,11 @@ class TimeIntentParser:
         # Stage 1 — keyword fast-path
         keyword_result = self._keyword_parse(query)
         if keyword_result and keyword_result["confidence"] >= self._KEYWORD_SHORTCIRCUIT_THRESHOLD:
-            print(f"⚡ [TimeIntentParser/keywords] intent={keyword_result}  query='{query[:60]}'")
+            print(f" [TimeIntentParser/keywords] intent={keyword_result}  query='{query[:60]}'")
             return keyword_result
 
         # Stage 2 — LLM fallback for ambiguous queries
-        print(f"🤖 [TimeIntentParser/LLM] Ambiguous query, calling LLM: '{query[:60]}'")
+        print(f" [TimeIntentParser/LLM] Ambiguous query, calling LLM: '{query[:60]}'")
         result = self._llm_parse(query)
-        print(f"🕐 [TimeIntentParser/LLM] intent={result}")
+        print(f" [TimeIntentParser/LLM] intent={result}")
         return result

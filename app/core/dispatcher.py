@@ -31,7 +31,8 @@ class ContextDispatcher:
         self, 
         query: str, 
         time_layers: List[str], 
-        topics: List[str]
+        topics: List[str],
+        company_id: str = "system_global"
     ) -> str:
         """
         Gathers context from all relevant sources and combines them.
@@ -39,13 +40,18 @@ class ContextDispatcher:
         context_parts = []
 
         # ── Part 1: Gather Numerical Data ─────────────────────────────────
-        # We only call Data Providers if the query has temporal intent 
-        # or specific metrics (topics) requested.
         if time_layers or topics:
             for dp in self.data_providers:
-                data_context = dp.fetch_context(time_layers, topics)
-                if data_context:
-                    context_parts.append(data_context)
+                # Security Check: Only fetch if provider belongs to company or is system_global
+                if dp.company_id != "system_global" and dp.company_id != company_id:
+                    continue
+
+                try:
+                    data_context = dp.fetch_context(time_layers, topics)
+                    if data_context:
+                        context_parts.append(data_context)
+                except Exception as e:
+                    print(f" [Dispatcher] Provider {dp.provider_name} failed: {e}")
 
         # ── Part 2: Gather Documentation/Knowledge ────────────────────────
         # We always check knowledge providers if the query seems conceptual

@@ -11,29 +11,163 @@ class EnergyDatabase:
     
     def _init_db(self):
         cursor = self.conn.cursor()
-        # Store date_heure as ISO8601 WITH timezone offset (critical fix)
-        cols = ", ".join([
-            f"{field} TEXT" if field == "date_heure" else f"{field} INTEGER"
-            for field in CRITICAL_FIELDS
+
+        # ── Legacy table (RTE-specific, kept for backward compat) ─────────────
+        legacy_cols = ", ".join([
+            f"{field} TEXT" if field == "date_heure" else f"{field} REAL"
+            for field in ["date_heure","consommation","nucleaire","eolien",
+                          "solaire","hydraulique","gaz","taux_co2","ech_physiques"]
         ])
         cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS energy_data (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                {cols},
+                company_id TEXT NOT NULL DEFAULT 'system_global',
+                source_id TEXT NOT NULL DEFAULT 'rte_default',
+                {legacy_cols},
                 fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_date_heure ON energy_data(date_heure DESC)")
+
+        # ── Universal table (source-agnostic, all new providers write here) ──
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS energy_readings (
+                id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id             TEXT    NOT NULL DEFAULT 'system_global',
+                source_id              TEXT    NOT NULL DEFAULT 'unknown',
+                timestamp              TEXT,            -- ISO8601 with tz
+                consumption_mw         REAL,            -- Total load (MW)
+                solar_mw               REAL,            -- Solar PV (MW)
+                wind_mw                REAL,            -- Wind (MW)
+                hydro_mw               REAL,            -- Hydro (MW)
+                gas_mw                 REAL,            -- Gas / CCGT (MW)
+                nuclear_mw             REAL,            -- Nuclear (MW)
+                biomass_mw             REAL,            -- Biomass (MW)
+                storage_mw             REAL,            -- Battery storage (MW)
+                grid_exchange_mw       REAL,            -- Cross-border (MW)
+                carbon_intensity_g_kwh REAL,            -- CO2 g/kWh
+                total_production_mw    REAL,            -- Sum of all gen
+                capacity_mw            REAL,            -- Installed capacity
+                availability_pct       REAL,            -- % capacity available
+                peak_load_mw           REAL,            -- Period peak demand
+                forecast_mw            REAL,            -- Day-ahead forecast
+                fetched_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Indexes for fast multi-tenant time-range queries
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_readings_comp_source_ts
+            ON energy_readings(company_id, source_id, timestamp DESC)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_comp_source_date
+            ON energy_data(company_id, source_id, date_heure DESC)
+        """)
+
+        # Robust column check for legacy table
+        cursor.execute("PRAGMA table_info(energy_data)")
+        existing_cols = [c[1] for c in cursor.fetchall()]
+        if "company_id" not in existing_cols:
+            cursor.execute("ALTER TABLE energy_data ADD COLUMN company_id TEXT DEFAULT 'system_global'")
+        if "source_id" not in existing_cols:
+            cursor.execute("ALTER TABLE energy_data ADD COLUMN source_id TEXT DEFAULT 'rte_default'")
+
         self.conn.commit()
+
     
     
         # app/database.py → EnergyDatabase.store_records()
+    # ── Universal Schema Methods (new energy_readings table) ─────────────────
 
-    def store_records(self, records):
-        """Store records with duplicate prevention. Returns count of NEW records."""
+    def store_universal_reading(self, record: dict, source_id: str, company_id: str) -> bool:
+        """
+        Store one normalized record into the universal energy_readings table.
+        record keys must match UNIVERSAL_SCHEMA field names.
+        Skips duplicates based on (company_id, source_id, timestamp).
+        """
         cursor = self.conn.cursor()
-        placeholders = ", ".join(["?"] * len(CRITICAL_FIELDS))
-        cols = ", ".join(CRITICAL_FIELDS)
+        ts = record.get("timestamp", "")
+        if not ts:
+            return False
+
+        cursor.execute(
+            "SELECT 1 FROM energy_readings WHERE company_id=? AND source_id=? AND timestamp=?",
+            (company_id, source_id, ts)
+        )
+        if cursor.fetchone():
+            return False  # duplicate
+
+        cursor.execute("""
+            INSERT INTO energy_readings (
+                company_id, source_id, timestamp,
+                consumption_mw, solar_mw, wind_mw, hydro_mw, gas_mw, nuclear_mw,
+                biomass_mw, storage_mw, grid_exchange_mw, carbon_intensity_g_kwh,
+                total_production_mw, capacity_mw, availability_pct,
+                peak_load_mw, forecast_mw
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            company_id, source_id, ts,
+            record.get("consumption_mw"),
+            record.get("solar_mw"),
+            record.get("wind_mw"),
+            record.get("hydro_mw"),
+            record.get("gas_mw"),
+            record.get("nuclear_mw"),
+            record.get("biomass_mw"),
+            record.get("storage_mw"),
+            record.get("grid_exchange_mw"),
+            record.get("carbon_intensity_g_kwh"),
+            record.get("total_production_mw"),
+            record.get("capacity_mw"),
+            record.get("availability_pct"),
+            record.get("peak_load_mw"),
+            record.get("forecast_mw"),
+        ))
+        self.conn.commit()
+        return True
+
+    def get_universal_readings(self, company_id: str, source_id: str = None,
+                                hours: int = 24) -> list:
+        """Fetch recent records from energy_readings for a given company."""
+        cursor = self.conn.cursor()
+        query = """
+            SELECT * FROM energy_readings
+            WHERE company_id = ?
+            AND timestamp >= datetime('now', ? || ' hours')
+        """
+        params = [company_id, f"-{hours}"]
+        if source_id:
+            query += " AND source_id = ?"
+            params.append(source_id)
+        query += " ORDER BY timestamp ASC"
+        cursor.execute(query, params)
+        cols = [d[0] for d in cursor.description]
+        return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def get_latest_universal_reading(self, company_id: str, source_id: str = None) -> dict:
+        """Get the most recent record from energy_readings."""
+        cursor = self.conn.cursor()
+        query = "SELECT * FROM energy_readings WHERE company_id = ?"
+        params = [company_id]
+        if source_id:
+            query += " AND source_id = ?"
+            params.append(source_id)
+        query += " ORDER BY timestamp DESC LIMIT 1"
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+        if not row:
+            return {}
+        cols = [d[0] for d in cursor.description]
+        return dict(zip(cols, row))
+
+    # ── Legacy Methods (energy_data table — RTE backward compat) ─────────────
+
+
+    def store_records(self, records, source_id: str, company_id: str):
+        """Store records with duplicate prevention for a specific source and company."""
+        cursor = self.conn.cursor()
+        placeholders = ", ".join(["?"] * (len(CRITICAL_FIELDS) + 2))
+        cols = "company_id, source_id, " + ", ".join(CRITICAL_FIELDS)
         stored_count = 0
         
         for record in records:
@@ -41,58 +175,66 @@ class EnergyDatabase:
             if not raw_ts:
                 continue
             
-            # ✅ CRITICAL: NO NORMALIZATION - store EXACTLY as received
-            # Only validate it has timezone info for debugging
             if '+' not in raw_ts and not raw_ts.endswith('Z'):
-                print(f"⚠️ Skipping record with naive timestamp (no TZ): {raw_ts}")
                 continue
             
-            # Skip duplicates using RAW timestamp string
-            cursor.execute("SELECT 1 FROM energy_data WHERE date_heure = ?", (raw_ts,))
+            # Skip duplicates using RAW timestamp, source_id, AND company_id
+            cursor.execute(
+                "SELECT 1 FROM energy_data WHERE company_id = ? AND source_id = ? AND date_heure = ?", 
+                (company_id, source_id, raw_ts)
+            )
             if cursor.fetchone():
-                continue  # Already exists → skip
+                continue
             
-            values = [raw_ts if field == "date_heure" else record.get(field) for field in CRITICAL_FIELDS]
+            values = [company_id, source_id] + [raw_ts if field == "date_heure" else record.get(field) for field in CRITICAL_FIELDS]
             cursor.execute(f"INSERT INTO energy_data ({cols}) VALUES ({placeholders})", values)
             stored_count += 1
         
         self.conn.commit()
-        return stored_count  # Returns int (never None)
+        return stored_count
     
 
 
 
-    def get_latest_record(self):
-        """Get absolute latest record (no time filtering)"""
+    def get_latest_record(self, company_id: str, source_id: str = None):
+        """Get absolute latest record for a specific company."""
         cursor = self.conn.cursor()
-        cursor.execute("""
-            SELECT * FROM energy_data 
-            ORDER BY date_heure DESC 
-            LIMIT 1
-        """)
+        query = "SELECT * FROM energy_data WHERE company_id = ?"
+        params = [company_id]
+        if source_id:
+            query += " AND source_id = ?"
+            params.append(source_id)
+        
+        query += " ORDER BY date_heure DESC LIMIT 1"
+        cursor.execute(query, params)
         row = cursor.fetchone()
         if not row:
             return None
         
-        # Return full record with timezone-aware datetime for debugging
-        record = dict(zip(CRITICAL_FIELDS, row[1:-1]))
+        # id(0), company_id(1), source_id(2), fields(3...N), fetched_at(-1)
+        record = dict(zip(CRITICAL_FIELDS, row[3:-1]))
+        record['company_id'] = row[1]
+        record['source_id'] = row[2]
         record['_debug_fetched_at'] = row[-1]
         return record
     
-    def get_time_range(self, start_dt, end_dt):
-        """Time-range query using ISO8601 string comparison (safe in SQLite)"""
+    def get_time_range(self, company_id: str, start_dt, end_dt, source_id: str = None):
+        """Time-range query with strict company isolation."""
         cursor = self.conn.cursor()
-        # Convert to ISO8601 strings WITH timezone for reliable comparison
         start_iso = start_dt.isoformat()
         end_iso = end_dt.isoformat()
         
-        cursor.execute("""
-            SELECT * FROM energy_data 
-            WHERE date_heure BETWEEN ? AND ?
-            ORDER BY date_heure ASC
-        """, (start_iso, end_iso))
+        query = "SELECT * FROM energy_data WHERE company_id = ? AND date_heure BETWEEN ? AND ?"
+        params = [company_id, start_iso, end_iso]
         
-        return [dict(zip(CRITICAL_FIELDS, row[1:-1])) for row in cursor.fetchall()]
+        if source_id:
+            query += " AND source_id = ?"
+            params.append(source_id)
+            
+        query += " ORDER BY date_heure ASC"
+        cursor.execute(query, params)
+        
+        return [dict(zip(CRITICAL_FIELDS, row[3:-1])) for row in cursor.fetchall()]
     
     
     def get_all(self):
@@ -110,11 +252,11 @@ class EnergyDatabase:
         """Diagnostic tool - run after fetch to verify storage"""
         record = self.get_latest_record()
         if record:
-            print(f"✅ Latest record stored: {record['date_heure']}")
+            print(f" Latest record stored: {record['date_heure']}")
             print(f"   Consommation: {record.get('consommation')} MW")
             print(f"   Fetched at: {record['_debug_fetched_at']}")
         else:
-            print("❌ No records in database!")
+            print(" No records in database!")
             
     def get_today_records(self):
         """Get all records from today (00:00 to now)"""

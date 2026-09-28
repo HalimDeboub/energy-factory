@@ -52,7 +52,7 @@ class ProviderRegistry:
             else:
                 package_dir = os.path.dirname(package.__file__)
         except ImportError:
-            print(f"⚠️ [Registry] Could not find package: {package_path}")
+            print(f"[Registry] Could not find package: {package_path}")
             return []
 
         # 2. Iterate through all modules (.py files) in the directory
@@ -70,15 +70,15 @@ class ProviderRegistry:
                 for name, obj in inspect.getmembers(module, inspect.isclass):
                     # Check if it's a subclass of the base, and NOT the base itself
                     if issubclass(obj, base_class) and obj is not base_class:
-                        print(f"🔌 [Registry] Discovered: {name} in {full_module_path}")
+                        print(f"[Registry] Discovered: {name} in {full_module_path}")
                         try:
                             # 4. Instantiate the provider
                             providers.append(obj())
                         except Exception as e:
-                            print(f"❌ [Registry] Failed to init {name}: {e}")
+                            print(f"[Registry] Failed to init {name}: {e}")
             
             except Exception as e:
-                print(f"❌ [Registry] Error loading module {full_module_path}: {e}")
+                print(f"[Registry] Error loading module {full_module_path}: {e}")
 
         return providers
 
@@ -88,25 +88,57 @@ class ProviderRegistry:
         Auto-load everything in app/providers/data/ AND dynamic sources from config.
         """
         # 1. Discover hardcoded Python providers (like RTEDataProvider)
-        providers = cls.discover_providers("app.providers.data", BaseDataProvider)
+        providers = []
+        if os.getenv("ENABLE_RTE", "false").lower() == "true":
+            providers = cls.discover_providers("app.providers.data", BaseDataProvider)
+        else:
+            print("[Registry] Built-in RTE provider is disabled (ENABLE_RTE=false)")
 
         # 2. Discover dynamic sources added via the UI (stored in sources.json)
         from app.config.sources import CONFIG_PATH
         from app.providers.data.dynamic_api_provider import DynamicAPIProvider
+        from app.providers.data.dynamic_db_provider import DynamicDBProvider
         try:
             if os.path.exists(CONFIG_PATH):
                 with open(CONFIG_PATH, 'r') as f:
                     config = json.load(f)
                     for source in config.get("data_sources", []):
                         if source.get("enabled"):
-                            print(f"🌐 [Registry] Loading Dynamic Source: {source['name']}")
-                            providers.append(DynamicAPIProvider(source_id=source['id']))
+                            persist = source.get("persist_data", False)
+                            stype = source.get("type", "rest_api")
+                            mode = "persist=ON" if persist else "live-only"
+                            print(f"[Registry] Loading Dynamic Source: {source['name']} ({stype}, {mode})")
+                            
+                            if stype in ["rest_api", "iot"]:
+                                providers.append(DynamicAPIProvider(source_id=source['id']))
+                            elif stype == "database":
+                                providers.append(DynamicDBProvider(source_id=source['id']))
         except Exception as e:
-            print(f"⚠️ [Registry] Failed to load dynamic sources: {e}")
+            print(f"[Registry] Failed to load dynamic sources: {e}")
 
         return providers
 
     @classmethod
     def load_all_knowledge_providers(cls) -> List[BaseKnowledgeProvider]:
-        """Auto-load everything in app/providers/knowledge/"""
-        return cls.discover_providers("app.providers.knowledge", BaseKnowledgeProvider)
+        """
+        Auto-load everything in app/providers/knowledge/ AND dynamic sources from config.
+        """
+        # 1. Discover hardcoded/local providers
+        providers = cls.discover_providers("app.providers.knowledge", BaseKnowledgeProvider)
+
+        # 2. Load dynamic knowledge sources (PDFs, URLs) from sources.json
+        from app.config.sources import CONFIG_PATH
+        from app.providers.knowledge.pdf_provider import PDFKnowledgeProvider
+        try:
+            if os.path.exists(CONFIG_PATH):
+                with open(CONFIG_PATH, 'r') as f:
+                    config = json.load(f)
+                    for ks in config.get("knowledge_sources", []):
+                        if ks.get("enabled"):
+                            print(f"[Registry] Loading Dynamic Knowledge: {ks['name']}")
+                            # Instantiate PDF provider with the specific path/URL
+                            providers.append(PDFKnowledgeProvider(document_path=ks.get('path', '')))
+        except Exception as e:
+            print(f"[Registry] Failed to load dynamic knowledge sources: {e}")
+
+        return providers

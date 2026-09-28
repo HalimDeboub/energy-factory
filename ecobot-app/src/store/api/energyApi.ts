@@ -42,7 +42,17 @@ interface InsightsMetricsResponse {
 
 interface EnergyDataPoint {
   time: string;
-  consommation: number;
+  // Universal names
+  consumption_mw: number;
+  nuclear_mw?: number;
+  wind_mw?: number;
+  solar_mw?: number;
+  hydro_mw?: number;
+  gas_mw?: number;
+  biomass_mw?: number;
+  carbon_intensity_g_kwh?: number;
+  // Legacy names for backward compatibility
+  consommation?: number;
   nucleaire?: number;
   eolien?: number;
   solaire?: number;
@@ -58,12 +68,22 @@ interface EnergyHistoryResponse {
 }
 
 interface EnergyMix {
+  // Universal
+  consumption_mw: number;
+  nuclear_mw: number;
+  wind_mw: number;
+  solar_mw: number;
+  hydro_mw: number;
+  gas_mw: number;
+  biomass_mw: number;
+  total_production: number;
+  carbon_intensity_g_kwh: number;
+  // Legacy
   nucleaire: number;
   eolien: number;
   solaire: number;
   hydraulique: number;
   gaz: number;
-  total_production: number;
   consommation: number;
   taux_co2: number;
   timestamp: string;
@@ -78,6 +98,13 @@ export const energyApi = createApi({
   reducerPath: "energyApi",
   baseQuery: fetchBaseQuery({
     baseUrl: "http://localhost:9000",
+    prepareHeaders: (headers) => {
+      const token = localStorage.getItem("token");
+      if (token) {
+        headers.set("authorization", `Bearer ${token}`);
+      }
+      return headers;
+    },
   }),
   tagTypes: ["Energy", "Health", "Insights"],
   endpoints: (builder) => ({
@@ -108,10 +135,10 @@ export const energyApi = createApi({
     // GET /insights/history - Get historical energy data for graphs
     getEnergyHistory: builder.query<
       EnergyHistoryResponse,
-      { period?: string; interval?: string }
+      { hours?: number }
     >({
-      query: ({ period = "24h", interval = "1h" }) =>
-        `/insights/history?period=${period}&interval=${interval}`,
+      query: ({ hours = 24 }) =>
+        `/insights/history?hours=${hours}`,
       providesTags: ["Insights"],
     }),
 

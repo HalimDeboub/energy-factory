@@ -1,24 +1,89 @@
-# Ignore local database files
+# ==============================================================================
+# Byte-compiled / optimized / Python cache files
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ==============================================================================
+# Databases, state, and credentials
+# ==============================================================================
 *.db
+*.db-journal
 *.sqlite
-*.env
-*.env.example
-# Ignore API call logs
-.env
-api_calls.json
+*.sqlite3
+app/database/*.db
+app/database/identity.db
 energy_data.db
-# Ignore virtual environment folders
+
+# Environment variables & secrets
+.env
+*.env
+.env.local
+.env.*.local
+!.env.example
+
+# ==============================================================================
+# Virtual Environments
+# ==============================================================================
 venv/
 env/
-# Ignore IDE/editor specific files
-.vscode/
-config.py
-.idea/
-*.pyc
-__pycache__/
-# Ignore logs and temporary files
-logs/   
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# ==============================================================================
+# Logs & temporary files
+# ==============================================================================
+logs/
 *.log
+*.jsonl
+api_calls.json
 temp/
 tmp/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ==============================================================================
+# Node / Frontend
+# ==============================================================================
 node_modules/
+ecobot-app/node_modules/
+ecobot-app/dist/
+ecobot-app/dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.eslintcache
+
+# ==============================================================================
+# Editor and OS specific files
+# ==============================================================================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+desktop.ini

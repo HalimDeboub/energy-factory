@@ -198,20 +198,20 @@ class ResponseCache:
         if entry is None:
             # Key not in store at all
             self._misses += 1
-            print(f"❌ [Cache MISS] key={key[:8]}… (not found)")
+            print(f" [Cache MISS] key={key[:8]} (not found)")
             return None
 
         if not entry.is_valid(current_data_timestamp, self.ttl_minutes):
             # Entry exists but is stale — remove it proactively
             del self._store[key]
             self._misses += 1
-            print(f"❌ [Cache MISS] key={key[:8]}… (stale/expired)")
+            print(f" [Cache MISS] key={key[:8]} (stale/expired)")
             return None
 
         # Cache hit!
         self._hits += 1
         age = (datetime.now() - entry.cached_at).total_seconds()
-        print(f"⚡ [Cache HIT]  key={key[:8]}… (age={age:.0f}s, layers={layers})")
+        print(f" [Cache HIT]  key={key[:8]} (age={age:.0f}s, layers={layers})")
         return entry.answer
 
     def set(
@@ -232,13 +232,13 @@ class ResponseCache:
         """
         key = self._make_key(self._normalize_query(query), layers)
         self._store[key] = CacheEntry(answer, layers, data_timestamp)
-        print(f"💾 [Cache SET]  key={key[:8]}… (layers={layers}, data_ts={data_timestamp})")
+        print(f" [Cache SET]  key={key[:8]} (layers={layers}, data_ts={data_timestamp})")
 
     def clear(self) -> None:
         """Manually flush the entire cache (useful for testing)."""
         count = len(self._store)
         self._store.clear()
-        print(f"🗑️  [Cache] Cleared {count} entries.")
+        print(f"  [Cache] Cleared {count} entries.")
 
     # ── Stats / observability ───────────────────────────────────────────────
 

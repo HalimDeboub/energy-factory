@@ -31,6 +31,12 @@ class BaseDataProvider(ABC):
 
     @property
     @abstractmethod
+    def company_id(self) -> str:
+        """The owner of this data source."""
+        pass
+
+    @property
+    @abstractmethod
     def supported_topics(self) -> List[str]:
         """List of metrics this source provides (e.g. ['nuclear', 'wind'])"""
         pass
@@ -51,6 +57,11 @@ class BaseDataProvider(ABC):
         """Returns the timestamp of the newest record (for cache invalidation)."""
         pass
 
+    @property
+    def is_persistent(self) -> bool:
+        """Determines if the ingestor should record this data in history."""
+        return True
+
     @abstractmethod
     def test_connection(self) -> Dict[str, Any]:
         """
@@ -58,6 +69,20 @@ class BaseDataProvider(ABC):
         Returns: {"status": "ok" | "error", "message": str, "latency_ms": int}
         """
         pass
+
+    def fetch_raw_data(self) -> List[Dict[str, Any]]:
+        """
+        Optional: Returns a list of raw records for persistence.
+        Default: returns empty list (non-persistent provider).
+        """
+        return []
+
+    def get_schema_mapping(self) -> Dict[str, str]:
+        """
+        Optional: Maps external API fields to internal CRITICAL_FIELDS.
+        Example: {"output_solar": "solaire", "load": "consommation"}
+        """
+        return {}
 
 
 

@@ -12,7 +12,7 @@ def job():
 schedule.every(16).minutes.do(job)
 
 # Initial fetch on startup
-print(f"⚡ Démarrage du scheduler à {datetime.now():%H:%M:%S}")
+print(f" Dmarrage du scheduler  {datetime.now():%H:%M:%S}")
 job()
 
 

@@ -48,7 +48,7 @@ class ContextBuilder:
 
         context = self.summarizer.build_context(query, list(layers))
 
-        print(f"🧠 Selected layers: {layers}")
-        print(f"📦 Context built:\n{context[:300]}...\n")
+        print(f" Selected layers: {layers}")
+        print(f" Context built:\n{context[:300]}...\n")
 
         return context if context else "⚠️ Contexte indisponible"

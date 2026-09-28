@@ -299,8 +299,8 @@ class TopicIntentParser:
         }
 
         if topics:
-            print(f"🎯 [TopicIntentParser] topics={topics}  query='{query[:60]}'")
+            print(f" [TopicIntentParser] topics={topics}  query='{query[:60]}'")
         else:
-            print(f"🎯 [TopicIntentParser] general query (no specific topic detected)")
+            print(f" [TopicIntentParser] general query (no specific topic detected)")
 
         return result

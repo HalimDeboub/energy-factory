@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
+from typing import List, Dict
 from app.tools.rag_pipeline import EnergyRAG
 from datetime import datetime
 from dotenv import load_dotenv
@@ -14,9 +15,9 @@ import os
 
 # Verify LangSmith is configured
 # if os.getenv("LANGCHAIN_TRACING_V2") != "true":
-#     print("⚠️ LANGCHAIN_TRACING_V2 not enabled! Traces won't appear in LangSmith")
+#     print(" LANGCHAIN_TRACING_V2 not enabled! Traces won't appear in LangSmith")
 # if not os.getenv("LANGCHAIN_API_KEY"):
-#     print("⚠️ LANGCHAIN_API_KEY missing! Get key: https://smith.langchain.com/settings")
+#     print(" LANGCHAIN_API_KEY missing! Get key: https://smith.langchain.com/settings")
 
 app = FastAPI(title="🇫🇷 Energy RAG API")
 
@@ -44,6 +45,29 @@ def get_db():
 
 rag = EnergyRAG()
 
+import asyncio
+from app.core.ingestor import UnifiedIngestor
+from app.config.config import FETCH_INTERVAL_MINUTES
+
+async def ingestion_loop():
+    """Background loop to sync all providers periodically"""
+    ingestor = UnifiedIngestor()
+    while True:
+        try:
+            print(" [System] Starting automated ingestion sync...")
+            # Sync everything currently loaded in the RAG dispatcher
+            ingestor.sync_all(rag.dispatcher.data_providers)
+            print(f" [System] Sync complete. Sleeping for {FETCH_INTERVAL_MINUTES}m")
+        except Exception as e:
+            print(f" [System] Ingestion loop error: {e}")
+        
+        await asyncio.sleep(FETCH_INTERVAL_MINUTES * 60)
+
+@app.on_event("startup")
+async def startup_event():
+    # Start the ingestion loop in the background
+    asyncio.create_task(ingestion_loop())
+
 # Pydantic models
 class QueryRequest(BaseModel):
     query: str
@@ -64,12 +88,15 @@ class InsightsMetricsResponse(BaseModel):
 class DataSourceConfig(BaseModel):
     id: str
     name: str
-    type: str  # "rest_api", "iot", "database"
+    type: str  # "rest_api", "iot", "database", "document"
     enabled: bool
     url: str | None = None
     topic: str | None = None
     connection_string: str | None = None
     metrics: List[str] = []
+    field_mapping: Dict[str, str] = {}
+    persist_data: bool = False
+    headers: Dict[str, str] = {}
 
 class SourcesResponse(BaseModel):
     data_sources: List[DataSourceConfig]
@@ -77,13 +104,48 @@ class SourcesResponse(BaseModel):
 
 class EnergyDataPoint(BaseModel):
     time: str
+    # Legacy names for UI compat
     consommation: float
     nucleaire: float | None = None
     eolien: float | None = None
     solaire: float | None = None
     hydraulique: float | None = None
     gaz: float | None = None
+    # Universal names
+    consumption_mw: float | None = None
+    nuclear_mw: float | None = None
+    wind_mw: float | None = None
+    solar_mw: float | None = None
+    hydro_mw: float | None = None
+    gas_mw: float | None = None
+    biomass_mw: float | None = None
     taux_co2: float | None = None
+    carbon_intensity_g_kwh: float | None = None
+
+class EnergyHistoryResponse(BaseModel):
+    status: str
+    data: List[EnergyDataPoint]
+    period: str
+
+class EnergyMix(BaseModel):
+    # Legacy
+    nucleaire: float
+    eolien: float
+    solaire: float
+    hydraulique: float
+    gaz: float
+    # Universal
+    nuclear_mw: float | None = None
+    wind_mw: float | None = None
+    solar_mw: float | None = None
+    hydro_mw: float | None = None
+    gas_mw: float | None = None
+    biomass_mw: float | None = None
+    # Common
+    total_production: float
+    consommation: float
+    taux_co2: float
+    timestamp: str
 
 class EnergyHistoryResponse(BaseModel):
     status: str
@@ -105,24 +167,95 @@ class EnergyMixResponse(BaseModel):
     status: str
     mix: EnergyMix
 
+# ── Auth & Identity Models ───────────────────────────────────────────
+from app.database.models import User, Company, Token
+from app.core.auth import get_password_hash, verify_password, create_access_token
+from app.database.auth_db import AuthDatabase
+import uuid
+
+auth_db = AuthDatabase()
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    full_name: str
+    company_name: str
+    sector: str
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/auth/register", response_model=Token)
+async def register(req: RegisterRequest):
+    # Check if user exists
+    if auth_db.get_user_by_email(req.email):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # 1. Create Company
+    company_id = str(uuid.uuid4())
+    company = Company(id=company_id, name=req.company_name, sector=req.sector)
+    auth_db.create_company(company)
+    
+    # 2. Create User
+    user_id = str(uuid.uuid4())
+    hashed_pwd = get_password_hash(req.password)
+    user = User(
+        id=user_id,
+        email=req.email,
+        full_name=req.full_name,
+        company_id=company_id,
+        role="admin",
+        hashed_password=hashed_pwd
+    )
+    auth_db.create_user(user)
+    
+    # 3. Issue Token
+    access_token = create_access_token(data={"sub": user.email, "company_id": company_id})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/auth/login", response_model=Token)
+async def login(req: LoginRequest):
+    user = auth_db.get_user_by_email(req.email)
+    if not user or not verify_password(req.password, user["hashed_password"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    access_token = create_access_token(data={"sub": user["email"], "company_id": user["company_id"]})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+from fastapi.security import OAuth2PasswordBearer
+from app.core.auth import decode_access_token
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return payload  # Returns {"sub": email, "company_id": cid}
+
 # Existing endpoints
 @app.post("/analyze-energy")
-async def analyze_energy(req: QueryRequest):
+async def analyze_energy(req: QueryRequest, user: dict = Depends(get_current_user)):
     try:
-        # 🔑 CORRECT CALL: Uses "input" key internally (handled by query() method)
+        # Use company_id from token to isolate RAG context (future enhancement)
+        company_id = user.get("company_id")
+        
         answer = rag.query(
             user_query=req.query,
-            session_id=req.session_id,  # ← Enables multi-turn memory
-            time_intent=req.time_intent
+            session_id=req.session_id,
+            time_intent=req.time_intent,
+            company_id=company_id
         )
         return {
             "status": "success",
             "analysis": answer,
+            "company_id": company_id,
             "timestamp": datetime.now().isoformat()
         }
         
     except Exception as e:
-        print(f"❌ Error in /analyze-energy: {str(e)}")
+        print(f" Error in /analyze-energy: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"RAG failed: {str(e)[:100]}"
@@ -163,36 +296,84 @@ async def state_check():
         return {"status": "error", "message": str(e)}
 
 @app.get("/sources", response_model=SourcesResponse)
-async def get_sources():
-    """List all registered data and knowledge sources"""
-    from app.config.sources import CONFIG_PATH
-    import json
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, 'r') as f:
-            return json.load(f)
-    return {"data_sources": [], "knowledge_sources": []}
-
-@app.post("/sources")
-async def add_source(source: DataSourceConfig):
-    """Add a new data source dynamically via the UI"""
+async def get_sources(user: dict = Depends(get_current_user)):
+    """List registered data and knowledge sources for the user's company"""
     from app.config.sources import CONFIG_PATH
     import json
     
+    company_id = user.get("company_id")
+    
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, 'r') as f:
+            full_config = json.load(f)
+            # Filter sources by company_id
+            data_sources = [s for s in full_config.get("data_sources", []) if s.get("company_id") == company_id or s.get("company_id") == "system_global"]
+            knowledge_sources = [s for s in full_config.get("knowledge_sources", []) if s.get("company_id") == company_id]
+            return {"data_sources": data_sources, "knowledge_sources": knowledge_sources}
+    return {"data_sources": [], "knowledge_sources": []}
+
+@app.post("/sources")
+async def add_source(source: DataSourceConfig, user: dict = Depends(get_current_user)):
+    """Add a new data or knowledge source dynamically"""
+    from app.config.sources import CONFIG_PATH
+    import json
+    
+    company_id = user.get("company_id")
     config = {"data_sources": [], "knowledge_sources": []}
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, 'r') as f:
             config = json.load(f)
     
-    # Check if ID already exists
-    if any(s['id'] == source.id for s in config['data_sources']):
-         raise HTTPException(status_code=400, detail="Source ID already exists")
-
-    config['data_sources'].append(source.dict())
+    source_data = source.dict()
+    source_data["company_id"] = company_id
+    
+    # Route to right collection based on type
+    if source_data.get("type") == "document":
+        # Transform to knowledge source format
+        ks = {
+            "id": source_data["id"],
+            "name": source_data["name"],
+            "type": "pdf", # or auto-detect
+            "path": source_data["url"],
+            "enabled": True,
+            "company_id": company_id
+        }
+        config['knowledge_sources'].append(ks)
+    else:
+        config['data_sources'].append(source_data)
     
     with open(CONFIG_PATH, 'w') as f:
         json.dump(config, f, indent=4)
         
-    return {"status": "success", "message": f"Source '{source.name}' added successfully"}
+    return {"status": "success", "message": f"Source '{source.name}' provisioned for company {company_id}"}
+
+@app.delete("/sources/{source_id}")
+async def delete_source(source_id: str, user: dict = Depends(get_current_user)):
+    """Remove a source registered for the user's company"""
+    from app.config.sources import CONFIG_PATH
+    import json
+    
+    company_id = user.get("company_id")
+    if not os.path.exists(CONFIG_PATH):
+        raise HTTPException(status_code=404, detail="Config file not found")
+        
+    with open(CONFIG_PATH, 'r') as f:
+        config = json.load(f)
+    
+    # Filter out the source if it belongs to this company
+    original_len = len(config.get("data_sources", [])) + len(config.get("knowledge_sources", []))
+    config["data_sources"] = [s for s in config.get("data_sources", []) if not (s.get("id") == source_id and s.get("company_id") == company_id)]
+    config["knowledge_sources"] = [s for s in config.get("knowledge_sources", []) if not (s.get("id") == source_id and s.get("company_id") == company_id)]
+    
+    new_len = len(config.get("data_sources", [])) + len(config.get("knowledge_sources", []))
+    
+    if original_len == new_len:
+        raise HTTPException(status_code=404, detail="Source not found or unauthorized")
+        
+    with open(CONFIG_PATH, 'w') as f:
+        json.dump(config, f, indent=4)
+        
+    return {"status": "success", "message": f"Source {source_id} removed"}
 
 @app.post("/sources/{source_id}/test")
 async def test_source_connection(source_id: str):
@@ -210,6 +391,75 @@ async def test_source_connection(source_id: str):
     
     return provider.test_connection()
 
+@app.post("/sources/discover")
+async def discover_source_fields(req: Dict[str, str]):
+    """
+    Fetch a sample record from a URL and suggest mappings to internal standards.
+    """
+    url = req.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+    
+    try:
+        import requests
+        resp = requests.get(url, timeout=10)
+        if not resp.ok:
+            return {"status": "error", "message": f"API returned {resp.status_code}"}
+        
+        data = resp.json()
+        
+        # Extract a sample record
+        sample = {}
+        if isinstance(data, list) and len(data) > 0:
+            sample = data[0]
+        elif isinstance(data, dict):
+            for key in ['results', 'records', 'data', 'items']:
+                if isinstance(data.get(key), list) and len(data[key]) > 0:
+                    sample = data[key][0]
+                    break
+            if not sample:
+                sample = data
+        
+        if not isinstance(sample, dict):
+            return {"status": "error", "message": "Could not extract a structured sample record"}
+
+        # Heuristic Mapping Logic
+        mapping_suggestions = {}
+        keywords = {
+            "consumption_mw": ["consumption", "load", "conso", "demand", "usage"],
+            "nuclear_mw": ["nuclear", "nuc"],
+            "solar_mw": ["solar", "pv", "sun"],
+            "wind_mw": ["wind", "eol"],
+            "hydro_mw": ["hydro", "water", "barrage"],
+            "gas_mw": ["gas", "gaz"],
+            "biomass_mw": ["biomass", "bio"],
+            "storage_mw": ["storage", "battery", "batterie", "pumped"],
+            "grid_exchange_mw": ["exchange", "export", "import", "interconnection"],
+            "carbon_intensity_g_kwh": ["co2", "carbon", "emission", "intensity"],
+            "total_production_mw": ["production", "generation", "total_gen"],
+            "capacity_mw": ["capacity", "installed", "max_power"],
+            "availability_pct": ["availability", "uptime", "ready"],
+            "peak_load_mw": ["peak", "max_demand"],
+            "forecast_mw": ["forecast", "prediction", "prev"],
+            "timestamp": ["date", "time", "timestamp", "ts", "period"]
+        }
+
+        for internal_key, syns in keywords.items():
+            for field in sample.keys():
+                field_lower = field.lower()
+                if any(s in field_lower for s in syns):
+                    mapping_suggestions[internal_key] = field
+                    break
+
+        return {
+            "status": "success",
+            "fields": list(sample.keys()),
+            "sample_data": sample,
+            "suggested_mapping": mapping_suggestions
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @app.get("/performance")
 async def get_performance_stats():
     """Get cache hits, misses, and average latency"""
@@ -220,23 +470,38 @@ async def get_performance_stats():
 
 # NEW: Insights endpoints
 @app.get("/insights/metrics", response_model=InsightsMetricsResponse)
-async def get_insights_metrics():
+async def get_insights_metrics(user: dict = Depends(get_current_user)):
     """
-    Get key energy metrics: CO2 saved, energy usage, and solar output
+    Get key energy metrics from universal energy_readings table.
+    Falls back to legacy energy_data (RTE) if no universal data exists.
     """
     try:
+        company_id = user.get("company_id")
         with get_db() as conn:
             cursor = conn.cursor()
-            
-            # Get latest record for current metrics
+
+            # Try universal table first
             cursor.execute("""
-                SELECT consommation, solaire, taux_co2, nucleaire, eolien, hydraulique
-                FROM energy_data
-                ORDER BY date_heure DESC
-                LIMIT 1
-            """)
+                SELECT consumption_mw, solar_mw, wind_mw, hydro_mw,
+                       carbon_intensity_g_kwh, nuclear_mw
+                FROM energy_readings
+                WHERE company_id = ? OR company_id = 'system_global'
+                ORDER BY timestamp DESC LIMIT 1
+            """, (company_id,))
             latest = cursor.fetchone()
-            
+
+            # Fallback to legacy RTE table
+            if not latest:
+                cursor.execute("""
+                    SELECT consommation as consumption_mw, solaire as solar_mw,
+                           taux_co2 as carbon_intensity_g_kwh, nucleaire as nuclear_mw,
+                           eolien as wind_mw, hydraulique as hydro_mw
+                    FROM energy_data
+                    WHERE company_id = ? OR company_id = 'system_global'
+                    ORDER BY date_heure DESC LIMIT 1
+                """, (company_id,))
+                latest = cursor.fetchone()
+
             if not latest:
                 return {
                     "status": "success",
@@ -248,146 +513,166 @@ async def get_insights_metrics():
                         "timestamp": datetime.now().isoformat()
                     }
                 }
-            
-            # Calculate renewable energy (excluding nuclear)
-            renewable_energy = (latest["solaire"] or 0) + (latest["eolien"] or 0) + (latest["hydraulique"] or 0)
-            
-            # Get average CO₂ rate for comparison (last 7 days)
+
+            consumption = latest["consumption_mw"] or 0
+            solar = latest["solar_mw"] or 0
+            wind = latest["wind_mw"] or 0
+            hydro = latest["hydro_mw"] or 0
+            co2 = latest["carbon_intensity_g_kwh"] or 0
+
+            # Get average CO2 for comparison
             cursor.execute("""
-                SELECT AVG(taux_co2) as avg_co2
-                FROM energy_data
-                WHERE date_heure >= datetime('now', '-30 days')
-                AND taux_co2 IS NOT NULL
+                SELECT AVG(carbon_intensity_g_kwh) as avg_co2 FROM energy_readings
+                WHERE timestamp >= datetime('now', '-30 days') AND carbon_intensity_g_kwh IS NOT NULL
             """)
-            avg_result = cursor.fetchone()
-            avg_co2 = avg_result["avg_co2"] if avg_result and avg_result["avg_co2"] else 100
-            
-            # Calculate CO₂ saved (compared to average)
-            current_co2 = latest["taux_co2"] or avg_co2
-            co2_saved = max(0, (avg_co2 - current_co2) * (latest["consommation"] or 0) / 1000)
-            
+            avg_res = cursor.fetchone()
+            avg_co2 = avg_res["avg_co2"] if avg_res and avg_res["avg_co2"] else co2 or 100
+
+            co2_saved = max(0, (avg_co2 - co2) * consumption / 1000)
+            solar_efficiency = round(solar / max(consumption, 1) * 100, 2)
+
             return {
                 "status": "success",
                 "metrics": {
                     "co2_saved_kg": round(co2_saved, 2),
-                    "current_consumption_kwh": round(latest["consommation"] or 0, 2),
-                    "solar_efficiency_percent": round((latest["solaire"] or 0) / (latest["consommation"] or 1) * 100, 2),
+                    "current_consumption_kwh": round(consumption, 2),
+                    "solar_efficiency_percent": solar_efficiency,
                     "period": "latest",
                     "timestamp": datetime.now().isoformat()
                 }
             }
     except Exception as e:
-        print(f"❌ Error in /insights/metrics: {str(e)}")
+        print(f"Error in /insights/metrics: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @app.get("/insights/history", response_model=EnergyHistoryResponse)
-async def get_energy_history(hours: int = 24):
+async def get_energy_history(hours: int = 24, user: dict = Depends(get_current_user)):
     """
-    Get historical energy consumption and renewable energy data
+    Get historical energy data from universal energy_readings table.
+    Falls back to legacy energy_data if no universal data available.
     """
     try:
+        company_id = user.get("company_id")
         with get_db() as conn:
             cursor = conn.cursor()
-            
+
+            # Try universal table
             cursor.execute("""
-                SELECT 
-                    date_heure,
-                    consommation,
-                    nucleaire,
-                    eolien,
-                    solaire,
-                    hydraulique,
-                    gaz,
-                    taux_co2
-                FROM energy_data
-                WHERE date_heure >= datetime('now', '-' || ? || ' hours')
-                ORDER BY date_heure ASC
-            """, (hours,))
-            
+                SELECT timestamp as time, consumption_mw, solar_mw, wind_mw,
+                       hydro_mw, gas_mw, nuclear_mw, carbon_intensity_g_kwh as taux_co2
+                FROM energy_readings
+                WHERE (company_id = ? OR company_id = 'system_global')
+                AND timestamp >= datetime('now', '-' || ? || ' hours')
+                ORDER BY timestamp ASC
+            """, (company_id, hours))
             rows = cursor.fetchall()
-            
+
+            if not rows:
+                # Fallback to legacy RTE table
+                cursor.execute("""
+                    SELECT date_heure as time,
+                           consommation as consumption_mw,
+                           nucleaire as nuclear_mw, eolien as wind_mw,
+                           solaire as solar_mw, hydraulique as hydro_mw,
+                           gaz as gas_mw, taux_co2
+                    FROM energy_data
+                    WHERE (company_id = ? OR company_id = 'system_global')
+                    AND date_heure >= datetime('now', '-' || ? || ' hours')
+                    ORDER BY date_heure ASC
+                """, (company_id, hours))
+                rows = cursor.fetchall()
+
             return {
                 "status": "success",
                 "data": [
                     {
-                        "time": row["date_heure"],
-                        "consommation": round(row["consommation"] or 0, 2),
-                        "nucleaire": row["nucleaire"],
-                        "eolien": row["eolien"],
-                        "solaire": row["solaire"],
-                        "hydraulique": row["hydraulique"],
-                        "gaz": row["gaz"],
-                        "taux_co2": row["taux_co2"]
+                        "time": row["time"],
+                        # Legacy
+                        "consommation": round(row["consumption_mw"] or 0, 2),
+                        "eolien": row["wind_mw"],
+                        "solaire": row["solar_mw"],
+                        "hydraulique": row["hydro_mw"],
+                        "gaz": row["gas_mw"],
+                        "nucleaire": row["nuclear_mw"],
+                        "taux_co2": row["taux_co2"],
+                        # Universal
+                        "consumption_mw": round(row["consumption_mw"] or 0, 2),
+                        "wind_mw": row["wind_mw"],
+                        "solar_mw": row["solar_mw"],
+                        "hydro_mw": row["hydro_mw"],
+                        "gas_mw": row["gas_mw"],
+                        "nuclear_mw": row["nuclear_mw"],
+                        "carbon_intensity_g_kwh": row["taux_co2"]
                     }
                     for row in rows
                 ],
                 "period": f"last_{hours}h"
             }
     except Exception as e:
-        print(f"❌ Error in /insights/history: {str(e)}")
+        print(f"Error in /insights/history: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @app.get("/insights/energy-mix", response_model=EnergyMixResponse)
-async def get_energy_mix():
+async def get_energy_mix(user: dict = Depends(get_current_user)):
     """
-    Get current energy mix breakdown by source
+    Get current energy mix from universal energy_readings.
+    Falls back to legacy energy_data if no universal data available.
     """
     try:
+        company_id = user.get("company_id")
         with get_db() as conn:
             cursor = conn.cursor()
-            
+
+            # Try universal table
             cursor.execute("""
-                SELECT 
-                    nucleaire,
-                    eolien,
-                    solaire,
-                    hydraulique,
-                    gaz,
-                    consommation,
-                    taux_co2
-                FROM energy_data
-                ORDER BY date_heure DESC
-                LIMIT 1
-            """)
-            
+                SELECT nuclear_mw, wind_mw, solar_mw, hydro_mw, gas_mw,
+                       biomass_mw, storage_mw, consumption_mw, carbon_intensity_g_kwh, timestamp
+                FROM energy_readings
+                WHERE company_id = ? OR company_id = 'system_global'
+                ORDER BY timestamp DESC LIMIT 1
+            """, (company_id,))
             row = cursor.fetchone()
-            
+
+            if row:
+                consumption = row["consumption_mw"] or 1
+                return {
+                    "status": "success",
+                    "mix": {
+                        "nucleaire": row["nuclear_mw"] or 0,
+                        "eolien": row["wind_mw"] or 0,
+                        "solaire": row["solar_mw"] or 0,
+                        "hydraulique": row["hydro_mw"] or 0,
+                        "gaz": row["gas_mw"] or 0,
+                        "total_production": round((row["nuclear_mw"] or 0) + (row["wind_mw"] or 0)
+                                                  + (row["solar_mw"] or 0) + (row["hydro_mw"] or 0)
+                                                  + (row["gas_mw"] or 0) + (row["biomass_mw"] or 0), 2),
+                        "consommation": consumption,
+                        "taux_co2": row["carbon_intensity_g_kwh"] or 0,
+                        "timestamp": row["timestamp"] or datetime.now().isoformat()
+                    }
+                }
+
+            # Fallback legacy RTE table
+            cursor.execute("""
+                SELECT nucleaire, eolien, solaire, hydraulique, gaz, consommation, taux_co2
+                FROM energy_data
+                WHERE company_id = ? OR company_id = 'system_global'
+                ORDER BY date_heure DESC LIMIT 1
+            """, (company_id,))
+            row = cursor.fetchone()
+
             if not row:
                 return {
                     "status": "success",
                     "mix": {
-                        "nucleaire": 0.0,
-                        "eolien": 0.0,
-                        "solaire": 0.0,
-                        "hydraulique": 0.0,
-                        "gaz": 0.0,
-                        "total_production": 0.0,
-                        "consommation": 0.0,
-                        "taux_co2": 0.0,
+                        "nucleaire": 0.0, "eolien": 0.0, "solaire": 0.0,
+                        "hydraulique": 0.0, "gaz": 0.0, "total_production": 0.0,
+                        "consommation": 0.0, "taux_co2": 0.0,
                         "timestamp": datetime.now().isoformat()
                     }
                 }
-            
-            total_consumption = row["consommation"] or 1
-            
-            sources = [
-                {"name": "Nuclear", "value": row["nucleaire"] or 0},
-                {"name": "Wind", "value": row["eolien"] or 0},
-                {"name": "Solar", "value": row["solaire"] or 0},
-                {"name": "Hydro", "value": row["hydraulique"] or 0},
-                {"name": "Gas", "value": row["gaz"] or 0},
-            ]
-            
-            # Calculate percentages
-            result = []
-            for source in sources:
-                if source["value"] > 0:
-                    result.append({
-                        "name": source["name"],
-                        "value": round(source["value"], 2),
-                        "percentage": round((source["value"] / total_consumption) * 100, 2)
-                    })
-            
+
+            consumption = row["consommation"] or 1
             return {
                 "status": "success",
                 "mix": {
@@ -396,18 +681,18 @@ async def get_energy_mix():
                     "solaire": row["solaire"] or 0,
                     "hydraulique": row["hydraulique"] or 0,
                     "gaz": row["gaz"] or 0,
-                    "total_production": total_consumption,
-                    "consommation": total_consumption,
+                    "total_production": consumption,
+                    "consommation": consumption,
                     "taux_co2": row["taux_co2"] or 0,
                     "timestamp": datetime.now().isoformat()
                 }
             }
     except Exception as e:
-        print(f"❌ Error in /insights/energy-mix: {str(e)}")
+        print(f"Error in /insights/energy-mix: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @app.get("/reports/ai-summary")
-async def get_ai_summary():
+async def get_ai_summary(user: dict = Depends(get_current_user)):
     """Generate an AI-driven summary of the last 24 hours of energy data"""
     try:
         # 1. Get data for the last 24h
@@ -417,8 +702,9 @@ async def get_ai_summary():
                 SELECT AVG(consommation) as avg_cons, MAX(consommation) as max_cons,
                        SUM(solaire) as total_solar, AVG(taux_co2) as avg_co2
                 FROM energy_data
-                WHERE date_heure >= datetime('now', '-24 hours')
-            """)
+                WHERE (company_id = ? OR company_id = 'system_global')
+                AND date_heure >= datetime('now', '-24 hours')
+            """, (user.get("company_id"),))
             summary_stats = cursor.fetchone()
 
         # 2. Construct a prompt for the RAG
@@ -434,7 +720,8 @@ async def get_ai_summary():
         
         answer = rag.query(
             user_query=query,
-            session_id="reporting_agent"
+            session_id="reporting_agent",
+            company_id=user.get("company_id", "system_global")
         )
 
         return {
@@ -443,9 +730,9 @@ async def get_ai_summary():
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        print(f"❌ Error generating AI report: {str(e)}")
+        print(f" Error generating AI report: {str(e)}")
         return {"status": "error", "message": "Failed to generate AI report"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=9000, reload=True)
+    uvicorn.run("app.fast_api:app", host="0.0.0.0", port=9000, reload=True)

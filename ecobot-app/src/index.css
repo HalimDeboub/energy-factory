@@ -3,10 +3,21 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --primary: 05 150 105; /* emerald-600 */
+    --primary-foreground: 255 255 255;
+    --background: 248 250 252; /* slate-50 */
+    --foreground: 71 85 105; /* slate-600 */
+    --card: 255 255 255;
+    --card-foreground: 71 85 105;
+    --border: 226 232 240; /* slate-200 */
+    --ring: 16 185 129; /* emerald-500 */
+  }
+
   * {
-    @apply border-gray-200;
+    @apply border-slate-200;
   }
   body {
-    @apply bg-gray-50 text-gray-900;
+    @apply bg-slate-50 text-slate-600 font-sans antialiased;
   }
 }

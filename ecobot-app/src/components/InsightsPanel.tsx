@@ -19,8 +19,7 @@ export function InsightsPanel() {
     useGetInsightsMetricsQuery("today");
   const { data: historyData, isLoading: historyLoading } =
     useGetEnergyHistoryQuery({
-      period: "24h",
-      interval: "1h",
+      hours: 24,
     });
 
   const metrics = metricsData?.metrics;
@@ -84,7 +83,7 @@ export function InsightsPanel() {
                 />
                 <Line
                   type="monotone"
-                  dataKey="consommation"
+                  dataKey="consumption_mw"
                   stroke="#eab308"
                   strokeWidth={2}
                   dot={{ fill: "#eab308", r: 3 }}

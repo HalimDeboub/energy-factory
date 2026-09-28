@@ -29,6 +29,7 @@ class RTEDataProvider(BaseDataProvider):
         self.db = EnergyDatabase()
         self.tz = pytz.timezone(TIMEZONE)
         self._name = "RTE France (eco2mix)"
+        self._company_id = "system_global"
         
         # Hardcoded for now, but could be dynamic from DB schema
         self._topics = [
@@ -41,11 +42,15 @@ class RTEDataProvider(BaseDataProvider):
         return self._name
 
     @property
+    def company_id(self) -> str:
+        return self._company_id
+
+    @property
     def supported_topics(self) -> List[str]:
         return self._topics
 
     def get_latest_timestamp(self) -> str:
-        latest = self.db.get_latest_record()
+        latest = self.db.get_latest_record(source_id="rte_france")
         return latest.get("date_heure", "") if latest else ""
 
     def test_connection(self) -> Dict[str, Any]:
@@ -59,6 +64,12 @@ class RTEDataProvider(BaseDataProvider):
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}
+
+    def fetch_raw_data(self) -> List[Dict[str, Any]]:
+        """Fetch latest records from RTE API."""
+        from app.tools.rte_api_client import RTEClient
+        client = RTEClient()
+        return client.fetch_latest()
 
 
     # ── Core Context Retrieval ──────────────────────────────────────────────
@@ -108,24 +119,28 @@ class RTEDataProvider(BaseDataProvider):
     def _layer_immediate(self, now: datetime) -> str:
         # Get last 7 hours of data to compute a trend
         start = now - timedelta(hours=7)
-        records = self.db.get_time_range(start, now)
+        records = self.db.get_time_range(self.company_id, start, now, source_id="rte_france")
         if not records: return ""
 
         latest = records[-1]
         ts = self._format_ts(latest["date_heure"], now)
-        
+
+        # Map legacy RTE fields -> universal labels for consistent LLM context
         return (
             f"LAYER: Real-time Status ({ts})\n"
-            f"- Consumption: {self._format_number(latest.get('consommation'))} MW\n"
-            f"- Nuclear: {self._format_number(latest.get('nucleaire'))} MW\n"
-            f"- Wind: {self._format_number(latest.get('eolien'))} MW\n"
-            f"- Solar: {self._format_number(latest.get('solaire'))} MW\n"
-            f"- CO2 Intensity: {self._format_number(latest.get('taux_co2'))} g/kWh"
+            f"- Total Consumption: {self._format_number(latest.get('consommation'))} MW\n"
+            f"- Nuclear Generation: {self._format_number(latest.get('nucleaire'))} MW\n"
+            f"- Wind Generation: {self._format_number(latest.get('eolien'))} MW\n"
+            f"- Solar Generation: {self._format_number(latest.get('solaire'))} MW\n"
+            f"- Hydro Generation: {self._format_number(latest.get('hydraulique'))} MW\n"
+            f"- Gas Generation: {self._format_number(latest.get('gaz'))} MW\n"
+            f"- CO2 Intensity: {self._format_number(latest.get('taux_co2'))} g/kWh\n"
+            f"- Grid Exchanges: {self._format_number(latest.get('ech_physiques'))} MW"
         )
 
     def _layer_today_pattern(self, now: datetime) -> str:
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        records = self.db.get_time_range(start, now)
+        records = self.db.get_time_range(self.company_id, start, now, source_id="rte_france")
         if not records: return ""
 
         max_cons = max((r.get("consommation") or 0) for r in records)
@@ -134,7 +149,7 @@ class RTEDataProvider(BaseDataProvider):
     def _layer_yesterday_comparison(self, now: datetime) -> str:
         yesterday = now - timedelta(days=1)
         start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-        records = self.db.get_time_range(start, yesterday)
+        records = self.db.get_time_range(self.company_id, start, yesterday, source_id="rte_france")
         if not records: return ""
         
         avg_cons = int(sum((r.get("consommation") or 0) for r in records) / len(records))

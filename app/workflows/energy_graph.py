@@ -20,9 +20,9 @@ class EnergyWorkflow:
             # Try to import one agent to check availability
             from app.agents.data_analyst import DataAnalystAgent
             self.agents_available = True
-            print("✓ Agents are available")
+            print(" Agents are available")
         except ImportError as e:
-            print(f"⚠️ Agents not available: {e}")
+            print(f" Agents not available: {e}")
             print("Using fallback workflow")
             self.agents_available = False
         

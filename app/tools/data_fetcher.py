@@ -34,7 +34,7 @@ class RTEDataFetcher:
     
     def fetch_latest(self):
         if not self._within_quota():
-            print("⚠️ API quota exhausted - using cached data only")
+            print(" API quota exhausted - using cached data only")
             return False
 
         # 🔑 CRITICAL: Use UTC timestamps WITH SINGLE QUOTES (ODSQL requirement)
@@ -59,7 +59,7 @@ class RTEDataFetcher:
         }
 
         try:
-            print(f"📡 Fetching data since {cutoff.strftime('%Y-%m-%d %H:%M')} Paris time...")
+            print(f" Fetching data since {cutoff.strftime('%Y-%m-%d %H:%M')} Paris time...")
             response = requests.get(RTE_API_URL_V2, params=params, timeout=15)
             response.raise_for_status()
 
@@ -68,7 +68,7 @@ class RTEDataFetcher:
 
             records = response.json().get("results", [])
             if not records:
-                print("❌ API returned 0 records")
+                print(" API returned 0 records")
                 return False
 
             # 🔍 DEBUG: Show actual timestamps from API
@@ -142,19 +142,19 @@ class RTEDataFetcher:
                     f"Conso: {latest['consommation']} MW"
                 )
             else:
-                print("⚠️ No valid records stored (all were forecasts/incomplete)")
+                print(" No valid records stored (all were forecasts/incomplete)")
 
             return stored_count > 0
 
         except requests.exceptions.HTTPError as e:
-            print(f"❌ HTTP {e.response.status_code} error")
+            print(f" HTTP {e.response.status_code} error")
             print(f"   URL: {e.request.url}")
             print(f"   Response: {e.response.text[:300]}")
             print(f"   Where clause used: {where_clause}")
             return False
 
         except Exception as e:
-            print(f"✗ API fetch failed: {type(e).__name__}: {e}")
+            print(f" API fetch failed: {type(e).__name__}: {e}")
             import traceback
             traceback.print_exc()
             return False

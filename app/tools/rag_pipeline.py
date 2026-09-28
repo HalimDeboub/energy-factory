@@ -125,11 +125,11 @@
 #     def get_session_history(self, session_id: str) -> BaseChatMessageHistory:
 #         """Get or create chat history for session"""
 #         if session_id not in self.chat_histories:
-#             print(f"🆕 Created new session: {session_id}")
+#             print(f" Created new session: {session_id}")
 #             self.chat_histories[session_id] = ChatMessageHistory()
 #         else:
 #             hist = self.chat_histories[session_id]
-#             print(f"💬 Session {session_id} has {len(hist.messages)} message(s) in history")
+#             print(f" Session {session_id} has {len(hist.messages)} message(s) in history")
 #         return self.chat_histories[session_id]
     
 #     def query(self, user_query: str, session_id: str = "default", time_intent: Optional[str] = None) -> str:
@@ -181,19 +181,19 @@
 #             inputs["has_fresh_data"] = has_fresh_data
            
 #             # ✅ Invoke with session config - THIS TRIGGERS history save/load
-#             print(f"🔍 Querying with session '{session_id}': '{user_query[:50]}...'")
+#             print(f" Querying with session '{session_id}': '{user_query[:50]}...'")
 #             result = chain_with_memory.invoke(
 #                 inputs,
 #                 config={"configurable": {"session_id": session_id},
 #                         "metadata": metadata}
                 
 #             )
-#             print(f"✅ Response: '{result[:60]}...'")
+#             print(f" Response: '{result[:60]}...'")
 #             return result
             
 #         except Exception as e:
 #             error_type = type(e).__name__
-#             print(f"❌ RAG error [{error_type}]: {str(e)[:150]}")
+#             print(f" RAG error [{error_type}]: {str(e)[:150]}")
 #             import traceback; traceback.print_exc()
 #             return (
 #                 f"⚠️ Erreur système ({error_type}). Réessayez dans 1 minute.\n"
@@ -311,7 +311,8 @@ RULES:
             inputs["context"] = self.dispatcher.build_hybrid_context(
                 query=inputs["input"],
                 time_layers=intent.get("time_range", []),
-                topics=intent.get("topics", [])
+                topics=intent.get("topics", []),
+                company_id=inputs.get("company_id", "system_global")
             )
 
             return inputs
@@ -330,7 +331,7 @@ RULES:
             self.chat_histories[session_id] = ChatMessageHistory()
         return self.chat_histories[session_id]
 
-    def query(self, user_query: str, session_id: str = "default", time_intent: Optional[str] = None) -> str:
+    def query(self, user_query: str, session_id: str = "default", time_intent: Optional[str] = None, company_id: str = "system_global") -> str:
         """
         Query the energy RAG pipeline with conversation memory and response caching.
 
@@ -370,7 +371,7 @@ RULES:
         result            = None
 
         try:
-            print(f"\n🔍 [RAG] session='{session_id}' | query='{user_query[:60]}'")
+            print(f"\n [RAG] session='{session_id}' | query='{user_query[:60]}'")
 
             with timer:
 
@@ -409,11 +410,11 @@ RULES:
                 if cached_answer is not None:
                     cache_hit = True
                     result    = cached_answer
-                    print(f"⚡ [RAG] Serving from cache. Stats: {self.cache.stats}")
+                    print(f" [RAG] Serving from cache. Stats: {self.cache.stats}")
 
                 else:
                     # ── Step 4: Cache MISS — run the full LLM pipeline ────
-                    print(f"🤖 [RAG] Cache miss — running LLM (layers={selected_layers}, topics={topic_result['topics']})")
+                    print(f" [RAG] Cache miss  running LLM (layers={selected_layers}, topics={topic_result['topics']})")
 
                     chain_with_memory = RunnableWithMessageHistory(
                         self.base_chain,
@@ -429,7 +430,8 @@ RULES:
                     inputs = {
                         "input":      user_query,
                         "_intent":    intent,
-                        "focus_hint": focus_hint,   # ← NEW: injected into {focus_hint} in prompt
+                        "focus_hint": focus_hint,
+                        "company_id": company_id
                     }
 
                     result = chain_with_memory.invoke(
@@ -453,12 +455,12 @@ RULES:
                 answer            = str(result),
             )
 
-            print(f"✅ [RAG] Done in {timer.elapsed_ms} ms | cache_hit={cache_hit} | Stats: {self.cache.stats}")
+            print(f" [RAG] Done in {timer.elapsed_ms} ms | cache_hit={cache_hit} | Stats: {self.cache.stats}")
             return result
 
         except Exception as exc:
             import traceback
-            print(f"❌ [RAG] Error [{type(exc).__name__}]: {exc}")
+            print(f" [RAG] Error [{type(exc).__name__}]: {exc}")
             traceback.print_exc()
 
             # Log the error — use elapsed_ms=0 if timer never started

@@ -6,11 +6,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 try:
     # For LangChain 1.2.4
     from langchain.agents.agent_executor import AgentExecutor
-    print("✓ Using AgentExecutor from agent_executor")
+    print(" Using AgentExecutor from agent_executor")
 except ImportError:
     try:
         from langchain.agents import AgentExecutor
-        print("✓ Using AgentExecutor from agents")
+        print(" Using AgentExecutor from agents")
     except ImportError:
         # Create a fallback
         class AgentExecutor:
@@ -23,7 +23,7 @@ except ImportError:
 # Use create_react_agent for LangChain 1.2.4
 try:
     from langchain.agents.react.base import create_react_agent
-    print("✓ Using create_react_agent")
+    print(" Using create_react_agent")
 except ImportError:
     # Fallback
     def create_react_agent(llm, tools, prompt):

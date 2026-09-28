@@ -114,7 +114,7 @@ class QueryLogger:
         # parents=True → create intermediate dirs if missing.
         # exist_ok=True → no error if dir already exists.
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
-        print(f"📝 [QueryLogger] Logging to: {self.log_file}")
+        print(f" [QueryLogger] Logging to: {self.log_file}")
 
     # ── Core write method ───────────────────────────────────────────────────
 
